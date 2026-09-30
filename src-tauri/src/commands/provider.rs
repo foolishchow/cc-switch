@@ -1,6 +1,7 @@
 use indexmap::IndexMap;
 use tauri::{Emitter, Manager, State};
 
+use cc_command_api::command_api;
 use crate::app_config::AppType;
 use crate::commands::copilot::CopilotAuthState;
 use crate::commands::xai_oauth::XaiOAuthState;
@@ -21,19 +22,17 @@ const TEMPLATE_TYPE_OFFICIAL_SUBSCRIPTION: &str = "official_subscription";
 const COPILOT_UNIT_PREMIUM: &str = "requests";
 
 /// 获取所有供应商
-#[tauri::command]
-pub fn get_providers(
-    state: State<'_, AppState>,
-    app: String,
-) -> Result<IndexMap<String, Provider>, String> {
-    let app_type = AppType::from_str(&app).map_err(|e| e.to_string())?;
-    ProviderService::list(state.inner(), app_type).map_err(|e| e.to_string())
+#[command_api(rest = "GET /control/v1/providers", query = "app")]
+pub fn get_providers(state: &AppState, app: String) -> Result<IndexMap<String, Provider>, AppError> {
+    let app_type = AppType::from_str(&app)?;
+    ProviderService::list(state, app_type)
 }
 
-#[tauri::command]
-pub fn get_current_provider(state: State<'_, AppState>, app: String) -> Result<String, String> {
-    let app_type = AppType::from_str(&app).map_err(|e| e.to_string())?;
-    ProviderService::current(state.inner(), app_type).map_err(|e| e.to_string())
+/// 获取当前供应商
+#[command_api(rest = "GET /control/v1/providers/current", query = "app")]
+pub fn get_current_provider(state: &AppState, app: String) -> Result<String, AppError> {
+    let app_type = AppType::from_str(&app)?;
+    ProviderService::current(state, app_type)
 }
 
 #[tauri::command]
@@ -1306,5 +1305,28 @@ mod native_query_credentials_tests {
 
         assert_eq!(base_url, "https://provider.zenmux.example/v1");
         assert_eq!(api_key, "sk-provider");
+    }
+
+    /// E1 价值验证：`get_providers_impl` / `get_current_provider_impl` 是纯函数，
+    /// 可直接用 `&AppState` 调用——无需 tauri::State / invoke 运行时。
+    #[test]
+    fn command_api_impl_callable_without_tauri_runtime() {
+        use crate::database::Database;
+        use super::{get_providers_impl, get_current_provider_impl};
+        use crate::store::AppState;
+        use std::sync::{Arc, Mutex, OnceLock};
+        // env 变更串行化，避免与其他用 HOME 的测试竞争
+        static GUARD: OnceLock<Mutex<()>> = OnceLock::new();
+        let _g = GUARD.get_or_init(|| Mutex::new(())).lock().unwrap();
+        let dir = tempfile::tempdir().expect("tempdir");
+        std::env::set_var("HOME", dir.path());
+        std::env::set_var("CC_SWITCH_TEST_HOME", dir.path());
+        let db = Arc::new(Database::memory().expect("in-memory db"));
+        let state = AppState::new(db);
+        // impl 直接调用——不经 tauri::State / generate_handler
+        let providers = get_providers_impl(&state, "claude".to_string());
+        assert!(providers.is_ok(), "get_providers_impl 应 Ok: {:?}", providers.err());
+        let current = get_current_provider_impl(&state, "claude".to_string());
+        assert!(current.is_ok(), "get_current_provider_impl 应 Ok: {:?}", current.err());
     }
 }

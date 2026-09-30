@@ -108,6 +108,13 @@ impl From<rusqlite::Error> for AppError {
     }
 }
 
+/// 令 String 错误可经 `?` 转为 AppError（Message），便于命令体统一错误流。
+impl From<String> for AppError {
+    fn from(s: String) -> Self {
+        Self::Message(s)
+    }
+}
+
 impl From<AppError> for String {
     fn from(err: AppError) -> Self {
         err.to_string()

@@ -2,7 +2,9 @@
 //!
 //! 管理代理模式下的故障转移队列（基于 providers 表的 in_failover_queue 字段）
 
+use cc_command_api::command_api;
 use crate::database::FailoverQueueItem;
+use crate::error::AppError;
 use crate::provider::Provider;
 use crate::store::AppState;
 use std::str::FromStr;
@@ -117,32 +119,28 @@ pub async fn get_available_providers_for_failover(
 }
 
 /// 添加供应商到故障转移队列
-#[tauri::command]
+#[command_api(rest = "POST /control/v1/failover/queue", body = "app_type,provider_id")]
 pub async fn add_to_failover_queue(
-    state: tauri::State<'_, AppState>,
+    state: &AppState,
     app_type: String,
     provider_id: String,
-) -> Result<(), String> {
+) -> Result<(), AppError> {
     require_failover_app(&app_type)?;
     require_failover_provider(&state.db, &app_type, &provider_id)?;
-    state
-        .db
-        .add_to_failover_queue(&app_type, &provider_id)
-        .map_err(|e| e.to_string())
+    state.db.add_to_failover_queue(&app_type, &provider_id)?;
+    Ok(())
 }
 
 /// 从故障转移队列移除供应商
-#[tauri::command]
+#[command_api(rest = "DELETE /control/v1/failover/queue", body = "app_type,provider_id")]
 pub async fn remove_from_failover_queue(
-    state: tauri::State<'_, AppState>,
+    state: &AppState,
     app_type: String,
     provider_id: String,
-) -> Result<(), String> {
+) -> Result<(), AppError> {
     require_failover_app(&app_type)?;
-    state
-        .db
-        .remove_from_failover_queue(&app_type, &provider_id)
-        .map_err(|e| e.to_string())
+    state.db.remove_from_failover_queue(&app_type, &provider_id)?;
+    Ok(())
 }
 
 /// 获取指定应用的自动故障转移开关状态（从 proxy_config 表读取）

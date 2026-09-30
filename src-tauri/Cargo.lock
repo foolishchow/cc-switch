@@ -757,6 +757,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "cc-command-api"
+version = "0.1.0"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.117",
+]
+
+[[package]]
 name = "cc-switch"
 version = "3.20.4"
 dependencies = [
@@ -768,6 +777,7 @@ dependencies = [
  "base64 0.22.1",
  "brotli 7.0.0",
  "bytes",
+ "cc-command-api",
  "chrono",
  "dirs 5.0.1",
  "flate2",
