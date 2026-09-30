@@ -34,6 +34,8 @@ mod prompt;
 mod prompt_files;
 mod provider;
 mod proxy;
+#[cfg(feature = "rest_api")]
+mod rest_registry;
 mod services;
 mod session_manager;
 mod settings;

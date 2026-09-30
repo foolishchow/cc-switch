@@ -141,14 +141,17 @@ pub fn command_api(attr: TokenStream, item: TokenStream) -> TokenStream {
                 .collect()
         };
 
+        // 解析 method + 路径,{id} → :id(axum 动态段)——先于 ident 计算
+        let (method, axum_path) = parse_rest_route(rest_str);
+
         let rest_fn_name = format_ident!("{}_rest", name);
         let rest_meta_const = format_ident!("{}_REST", upper);
+        let mount_fn_name = format_ident!("{}_mount", name);
+        // axum routing 函数名(get/post/put/delete...)
+        let method_fn = format_ident!("{}", method.to_lowercase());
         let path_struct = format_ident!("{}Path", upper);
         let query_struct = format_ident!("{}Query", upper);
         let body_struct = format_ident!("{}Body", upper);
-
-        // 解析 method + 路径,{id} → :id(axum 动态段)
-        let (method, axum_path) = parse_rest_route(rest_str);
 
         // 各提取器结构体字段(从 other_args 取类型)
         let path_fields = fields_for(&path_names, &other_args);
@@ -239,6 +242,25 @@ pub fn command_api(attr: TokenStream, item: TokenStream) -> TokenStream {
                 #impl_name(&state, #call_args) #await_tok
                     .map(::axum::Json)
                     .map_err(|_| ::axum::http::StatusCode::INTERNAL_SERVER_ERROR)
+            }
+
+            /// 路由挂载器(非捕获 fn,可作 fn 指针存入注册器)
+            #[cfg(feature = "rest_api")]
+            #[doc(hidden)]
+            pub fn #mount_fn_name(
+                r: ::axum::Router<#state_ty>,
+            ) -> ::axum::Router<#state_ty> {
+                r.route(#axum_path, ::axum::routing::#method_fn(#rest_fn_name))
+            }
+
+            /// 自动提交到 inventory 注册器——解耦即上路由表,无 parity drift。
+            #[cfg(feature = "rest_api")]
+            ::inventory::submit! {
+                crate::rest_registry::RouteReg {
+                    method: #method,
+                    path: #axum_path,
+                    mount: #mount_fn_name,
+                }
             }
         })
     } else {
