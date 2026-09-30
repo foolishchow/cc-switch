@@ -1,13 +1,14 @@
-//! `#[command_api(rest = "METHOD /path", path = "id", body = "a,b", query = "c")]`
+//! `#[command_api(rest = "METHOD /path", path = "id", body = "a,b", query = "c", state = "service,app_state")]`
 //!
 //! **单一真相源 → 双生成**:一个纯 fn,宏生成三件套:
-//! 1. `<name>_impl` —— 原函数体改名(取 `&AppState`,纯函数,可单测,无需 Tauri 运行时)
+//! 1. `<name>_impl` —— 原函数体改名(取 `&AppState`/`&SkillServiceState` 等,纯函数,可单测)
 //! 2. `<name>` —— `#[tauri::command]` 适配(state.inner() + AppError→String)
 //! 3. (仅 `rest_api` feature)`<name>_rest` —— axum handler,按 path/query/body 取参
 //!
-//! 约定:名为 `state`、类型 `&AppState` 的参数注入 state;其余参数按
-//! `path`/`body`/`query` 属性路由到 axum 提取器(query 默认 = 未声明 path/body 的参)。
-//! 路径中 `{id}` 自动转 axum `:id`。返回 `Result<T: Serialize, AppError>`。
+//! 约定:`state` 属性列出 state 参数名(缺省时仅 `state` 参被视为 state);
+//! state 参数类型从 `&T` 注解提取,router 状态为 `AppState`(PoC:仅 AppState;
+//! 完整分支用 `RestState` 复合 + FromRef 支持自定义 state)。
+//! 其余参数按 `path`/`body`/`query` 属性路由;路径中 `{id}` 自动转 axum `:id`。
 
 use proc_macro::TokenStream;
 use proc_macro2::TokenStream as TokenStream2;
@@ -18,12 +19,13 @@ use syn::{
     FnArg, ItemFn, LitStr, Pat, Result, Token, Type,
 };
 
-/// 属性:`rest = "POST /p", path = "id", body = "a,b", query = "c"`(均除 rest 可选)
+/// 属性:`rest = "POST /p", path = "id", body = "a,b", query = "c", state = "service,app_state"`
 struct CommandApiAttr {
     rest: Option<String>,
     path: Option<String>,
     body: Option<String>,
     query: Option<String>,
+    state: Option<String>,
 }
 
 impl Parse for CommandApiAttr {
@@ -32,6 +34,7 @@ impl Parse for CommandApiAttr {
         let mut path = None;
         let mut body = None;
         let mut query = None;
+        let mut state = None;
         while !input.is_empty() {
             let k: syn::Ident = input.parse()?;
             input.parse::<Token![=]>()?;
@@ -41,23 +44,40 @@ impl Parse for CommandApiAttr {
                 "path" => path = Some(v.value()),
                 "body" => body = Some(v.value()),
                 "query" => query = Some(v.value()),
+                "state" => state = Some(v.value()),
                 other => {
                     return Err(syn::Error::new(k.span(), format!("未知属性 {other}")))
                 }
             }
             let _ = input.parse::<Token![,]>();
         }
-        Ok(Self { rest, path, body, query })
+        Ok(Self { rest, path, body, query, state })
     }
 }
 
-fn split_names(s: &Option<String>) -> Vec<String> {
+/// `(name, optional rename)`；`"app_type as app"` → (`app_type`, Some(`app`))
+fn split_names(s: &Option<String>) -> Vec<(String, Option<String>)> {
     s.as_deref()
         .unwrap_or("")
         .split(',')
-        .map(|x| x.trim().to_string())
-        .filter(|x| !x.is_empty())
+        .map(|x| {
+            let x = x.trim();
+            if x.is_empty() {
+                return (String::new(), None);
+            }
+            match x.split_once(" as ") {
+                Some((n, r)) => (n.trim().to_string(), Some(r.trim().to_string())),
+                None => (x.to_string(), None),
+            }
+        })
+        .filter(|(n, _)| !n.is_empty())
         .collect()
+}
+
+/// 调用参槽位:state 参数(按 ident 填充提取器变量)或普通参数(按 path/body/query 取字段)。
+enum Slot {
+    State(syn::Ident),
+    Arg(syn::Ident),
 }
 
 #[proc_macro_attribute]
@@ -69,31 +89,32 @@ pub fn command_api(attr: TokenStream, item: TokenStream) -> TokenStream {
     let impl_name = format_ident!("{}_impl", name);
     let is_async = func.sig.asyncness.is_some();
 
+    // state 参数名集合:显式 `state="service,app_state"` 或缺省退化为 ["state"]。
+    let state_idents: Vec<String> = match &attr.state {
+        Some(s) => s.split(',').map(|x| x.trim().to_string()).filter(|x| !x.is_empty()).collect(),
+        None => vec!["state".to_string()],
+    };
+
     // 分离 state 参数与其余参数(保留声明顺序)
-    let mut state_ty: Option<Type> = None;
+    let mut state_params: Vec<(syn::Ident, Type)> = Vec::new();
     let mut other_args: Vec<(syn::Ident, Type)> = Vec::new();
     for arg in &func.sig.inputs {
         if let FnArg::Typed(pt) = arg {
             let ty = &pt.ty;
             if let Pat::Ident(pi) = &*pt.pat {
-                if pi.ident == "state" {
-                    state_ty = Some(strip_ref(ty));
+                if state_idents.iter().any(|s| s == &pi.ident.to_string()) {
+                    state_params.push((pi.ident.clone(), strip_ref(ty)));
                 } else {
                     other_args.push((pi.ident.clone(), (**ty).clone()));
                 }
             }
         }
     }
-    let state_ty = match state_ty {
-        Some(t) => t,
-        None => {
-            return syn::Error::new(name.span(), "command_api 需要 `state: &AppState` 参数")
-                .to_compile_error()
-                .into();
-        }
-    };
+    let has_state = !state_params.is_empty();
+    // router 状态类型:PoC 用 AppState(完整分支用 RestState 复合)。
+    let router_ty: Type = syn::parse_quote!(crate::store::AppState);
 
-    let ok_ty = extract_ok_type(&func.sig.output);
+    let (is_result_ret, ret_ty, ok_ty) = analyze_return(&func.sig.output);
 
     // —— 1. impl(改名,原函数体)——
     func.sig.ident = impl_name.clone();
@@ -107,46 +128,92 @@ pub fn command_api(attr: TokenStream, item: TokenStream) -> TokenStream {
     };
 
     // —— 2. Tauri command 适配(Tauri 端不需路由,所有参从 invoke args 取)——
-    let other_pats: Vec<_> = other_args.iter().map(|(i, _)| i.clone()).collect();
+    // 按原始签名顺序的调用参槽位
+    let call_slots: Vec<Slot> = func.sig.inputs.iter().filter_map(|arg| {
+        if let FnArg::Typed(pt) = arg {
+            if let Pat::Ident(pi) = &*pt.pat {
+                if state_idents.iter().any(|s| s == &pi.ident.to_string()) {
+                    return Some(Slot::State(pi.ident.clone()));
+                }
+                return Some(Slot::Arg(pi.ident.clone()));
+            }
+        }
+        None
+    }).collect();
+
     let other_inputs: TokenStream2 = other_args
         .iter()
         .map(|(i, t)| quote! { #i: #t, })
         .collect();
+    // 每个 state 参数生成一个 tauri::State<'_, #ty> 声明
+    let tauri_state_params: TokenStream2 = state_params
+        .iter()
+        .map(|(i, t)| quote! { #i: tauri::State<'_, #t>, })
+        .collect();
     let await_tok = if is_async { Some(quote! {.await}) } else { None };
     let async_kw = if is_async { Some(quote! {async}) } else { None };
+    // Tauri 调用参:state 槽 → #ident.inner();普通槽 → #ident
+    let tauri_call: TokenStream2 = call_slots.iter().map(|slot| match slot {
+        Slot::State(i) => { let t = i.clone(); quote! { #t.inner(), } }
+        Slot::Arg(i) => { let t = i.clone(); quote! { #t, } }
+    }).collect();
+    let tauri_body = if is_result_ret {
+        quote! {
+            #impl_name(#tauri_call) #await_tok
+                .map_err(|e| e.to_string())
+        }
+    } else {
+        quote! { #impl_name(#tauri_call) #await_tok }
+    };
+    let tauri_ret_ty = if is_result_ret {
+        quote! { std::result::Result<#ok_ty, String> }
+    } else {
+        quote! { #ret_ty }
+    };
     let tauri_cmd = quote! {
         #[tauri::command]
         #vis #async_kw fn #name(
-            state: tauri::State<'_, #state_ty>,
+            #tauri_state_params
             #other_inputs
-        ) -> std::result::Result<#ok_ty, String> {
-            #impl_name(state.inner(), #(#other_pats),*) #await_tok
-                .map_err(|e| e.to_string())
+        ) -> #tauri_ret_ty {
+            #tauri_body
         }
     };
 
     // —— 3. axum handler(仅 rest_api feature)——
-    let rest_handler = if let Some(rest_str) = &attr.rest {
-        let upper = name.to_string().to_uppercase();
+    // rest 可选：缺省时 method=POST、path=/control/v1/<fn_name>（零配置即暴露）
+    let (method, axum_path) = match &attr.rest {
+        Some(rest_str) => parse_rest_route(rest_str),
+        None => ("POST".to_string(), format!("/control/v1/{}", name)),
+    };
+    let rest_handler = {
+    let upper = name.to_string().to_uppercase();
         let path_names = split_names(&attr.path);
         let body_names = split_names(&attr.body);
-        // query 默认 = 未声明 path/body 的其余参;显式 query 覆盖
-        let query_names: Vec<String> = if attr.query.is_some() {
-            split_names(&attr.query)
+        // 零配置（path/body/query 均缺省）：全部非-state 参 → body（camelCase）
+        let all_default = attr.path.is_none() && attr.body.is_none() && attr.query.is_none();
+        let (query_names, body_names): (Vec<(String, Option<String>)>, Vec<(String, Option<String>)>) = if all_default {
+            (vec![], other_args.iter().map(|(i, _)| (i.to_string(), None)).collect())
         } else {
-            other_args
-                .iter()
-                .map(|(i, _)| i.to_string())
-                .filter(|n| !path_names.contains(n) && !body_names.contains(n))
-                .collect()
+            let qn: Vec<(String, Option<String>)> = if attr.query.is_some() {
+                split_names(&attr.query)
+            } else {
+                other_args
+                    .iter()
+                    .map(|(i, _)| (i.to_string(), None))
+                    .filter(|(n, _)| !path_names.iter().any(|(pn, _)| pn == n) && !body_names.iter().any(|(bn, _)| bn == n))
+                    .collect()
+            };
+            (qn, body_names)
         };
 
-        // 解析 method + 路径,{id} → :id(axum 动态段)——先于 ident 计算
-        let (method, axum_path) = parse_rest_route(rest_str);
+        // 解析 method + 路径已在上面完成（rest 或默认）
 
         let rest_fn_name = format_ident!("{}_rest", name);
         let rest_meta_const = format_ident!("{}_REST", upper);
         let mount_fn_name = format_ident!("{}_mount", name);
+        let name_str = name.to_string();
+        let path_param_strs: Vec<String> = path_names.iter().map(|(n, _)| n.clone()).collect();
         // axum routing 函数名(get/post/put/delete...)
         let method_fn = format_ident!("{}", method.to_lowercase());
         let path_struct = format_ident!("{}Path", upper);
@@ -158,21 +225,12 @@ pub fn command_api(attr: TokenStream, item: TokenStream) -> TokenStream {
         let query_fields = fields_for(&query_names, &other_args);
         let body_fields = fields_for(&body_names, &other_args);
 
-        // 调用 impl 的实参(按原声明顺序,从对应提取器取)
-        let call_args: TokenStream2 = other_args
+        // 提取器参数(顺序:state 提取器(各子状态) → Path, Query, Json——body 必须最后)
+        // 每个 state 参数生成一个 State<#ty> 提取器(router_ty=AppState 时仅 AppState 可解析)
+        let rest_state_extractors: TokenStream2 = state_params
             .iter()
-            .map(|(i, _)| {
-                if path_names.contains(&i.to_string()) {
-                    quote! { p.#i, }
-                } else if body_names.contains(&i.to_string()) {
-                    quote! { b.#i, }
-                } else {
-                    quote! { q.#i, }
-                }
-            })
+            .map(|(i, t)| quote! { ::axum::extract::State(#i): ::axum::extract::State<#t>, })
             .collect();
-
-        // 提取器参数(顺序:Path, Query, Json——body 必须最后)
         let path_extractor = if path_names.is_empty() {
             quote! {}
         } else {
@@ -187,6 +245,37 @@ pub fn command_api(attr: TokenStream, item: TokenStream) -> TokenStream {
             quote! {}
         } else {
             quote! { ::axum::Json(b): ::axum::Json<#body_struct>, }
+        };
+
+        // 按原始签名顺序构造调用参（state 槽 → &#ident；其余按 path/body/query 取结构体字段）
+        let rest_call: TokenStream2 = call_slots.iter().map(|slot| match slot {
+            Slot::State(i) => { let t = i.clone(); quote! { &#t, } }
+            Slot::Arg(i) => {
+                let s = i.to_string();
+                if path_names.iter().any(|(n, _)| n == &s) {
+                    quote! { p.#i, }
+                } else if body_names.iter().any(|(n, _)| n == &s) {
+                    quote! { b.#i, }
+                } else if query_names.iter().any(|(n, _)| n == &s) {
+                    quote! { q.#i, }
+                } else {
+                    quote! { #i, }
+                }
+            }
+        }).collect();
+
+        // 返回类型处理：Result → handler 返 Result<impl IntoResponse, StatusCode>，错误 500；
+        // 裸返回 → handler 直接返 impl IntoResponse（Json(_impl)，无错误路径）
+        let (rest_ret_ty, rest_body): (TokenStream2, TokenStream2) = if is_result_ret {
+            (quote! { std::result::Result<impl ::axum::response::IntoResponse, ::axum::http::StatusCode> },
+             quote! { #impl_name(#rest_call) #await_tok .map(::axum::Json).map_err(|_| ::axum::http::StatusCode::INTERNAL_SERVER_ERROR) })
+        } else {
+            (quote! { impl ::axum::response::IntoResponse },
+             quote! { ::axum::Json(#impl_name(#rest_call) #await_tok) })
+        };
+        let rest_ret_ty_def = quote! {
+            /// axum handler——按 path/query/body 取参,调 `_impl`,返 JSON。
+            #[cfg(feature = "rest_api")]
         };
 
         // 结构体定义(仅有字段的才生成;需 Deserialize)
@@ -216,10 +305,14 @@ pub fn command_api(attr: TokenStream, item: TokenStream) -> TokenStream {
             quote! {
                 #[cfg(feature = "rest_api")]
                 #[derive(::serde::Deserialize)]
+                #[serde(rename_all = "camelCase")]  // 对齐 Tauri/JS camelCase 约定
                 #[doc(hidden)]
                 pub struct #body_struct { #body_fields }
             }
         };
+
+        // has_state=false 时无 state 提取器(纯函数命令)
+        let _ = has_state;
 
         Some(quote! {
             /// REST 路由元信息(method + path),供注册器收集
@@ -231,25 +324,22 @@ pub fn command_api(attr: TokenStream, item: TokenStream) -> TokenStream {
             #query_struct_def
             #body_struct_def
 
-            /// axum handler——按 path/query/body 取参,调 `_impl`,返 JSON。
-            #[cfg(feature = "rest_api")]
+            #rest_ret_ty_def
             #vis async fn #rest_fn_name(
-                ::axum::extract::State(state): ::axum::extract::State<#state_ty>,
+                #rest_state_extractors
                 #path_extractor
                 #query_extractor
                 #body_extractor
-            ) -> std::result::Result<impl ::axum::response::IntoResponse, ::axum::http::StatusCode> {
-                #impl_name(&state, #call_args) #await_tok
-                    .map(::axum::Json)
-                    .map_err(|_| ::axum::http::StatusCode::INTERNAL_SERVER_ERROR)
+            ) -> #rest_ret_ty {
+                #rest_body
             }
 
             /// 路由挂载器(非捕获 fn,可作 fn 指针存入注册器)
             #[cfg(feature = "rest_api")]
             #[doc(hidden)]
             pub fn #mount_fn_name(
-                r: ::axum::Router<#state_ty>,
-            ) -> ::axum::Router<#state_ty> {
+                r: ::axum::Router<#router_ty>,
+            ) -> ::axum::Router<#router_ty> {
                 r.route(#axum_path, ::axum::routing::#method_fn(#rest_fn_name))
             }
 
@@ -262,9 +352,18 @@ pub fn command_api(attr: TokenStream, item: TokenStream) -> TokenStream {
                     mount: #mount_fn_name,
                 }
             }
+
+            /// 路由元数据（供 __routes 发现端点 dump）。
+            #[cfg(feature = "rest_api")]
+            ::inventory::submit! {
+                crate::rest_registry::RouteMeta {
+                    cmd: #name_str,
+                    method: #method,
+                    path: #axum_path,
+                    path_params: &[#(#path_param_strs),*],
+                }
+            }
         })
-    } else {
-        None
     };
 
     let out = quote! {
@@ -275,14 +374,21 @@ pub fn command_api(attr: TokenStream, item: TokenStream) -> TokenStream {
     out.into()
 }
 
-/// 由名字列表 + 原参类型,生成结构体字段 token(`pub name: Ty,`)
-fn fields_for(names: &[String], args: &[(syn::Ident, Type)]) -> TokenStream2 {
+/// 由名字列表 + 原参类型,生成结构体字段 token。
+/// 名字项为 `(name, optional rename)`;有 rename 时生成 `#[serde(rename="...")]`。
+fn fields_for(names: &[(String, Option<String>)], args: &[(syn::Ident, Type)]) -> TokenStream2 {
     names
         .iter()
-        .filter_map(|n| {
+        .filter_map(|(n, rename)| {
             args.iter()
                 .find(|(i, _)| i == n)
-                .map(|(i, t)| quote! { pub #i: #t, })
+                .map(|(i, t)| {
+                    if let Some(r) = rename {
+                        quote! { #[serde(rename = #r)] pub #i: #t, }
+                    } else {
+                        quote! { pub #i: #t, }
+                    }
+                })
         })
         .collect()
 }
@@ -307,20 +413,24 @@ fn strip_ref(ty: &Type) -> Type {
     }
 }
 
-/// 从 `-> Result<T, E>` 取出 T;解析失败则回退 `()`.
-fn extract_ok_type(output: &syn::ReturnType) -> Type {
+/// 分析返回类型 → (是否 Result, 完整返回类型, Ok 内类型或裸类型本身)。
+/// 裸返回（如 `-> bool`、`-> Vec<T>`）支持：is_result=false，ok_ty=返回类型本身。
+fn analyze_return(output: &syn::ReturnType) -> (bool, Type, Type) {
     if let syn::ReturnType::Type(_, ty) = output {
+        let full = (**ty).clone();
         if let Type::Path(p) = &**ty {
             if let Some(seg) = p.path.segments.last() {
                 if seg.ident == "Result" {
                     if let syn::PathArguments::AngleBracketed(args) = &seg.arguments {
                         if let Some(syn::GenericArgument::Type(t)) = args.args.first() {
-                            return t.clone();
+                            return (true, full, t.clone());
                         }
                     }
                 }
             }
         }
+        // 裸返回：ok_ty = 完整类型本身
+        return (false, full.clone(), full);
     }
-    syn::parse_quote!()
+    (false, syn::parse_quote!(()), syn::parse_quote!(()))
 }

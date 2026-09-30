@@ -1,10 +1,11 @@
 //! REST 路由注册器（仅 `rest_api` feature）。
 //!
-//! `#[command_api(rest = ...)]` 宏为每个命令 `inventory::submit!` 一个 [`RouteReg`]，
-//! 此模块用 `inventory::iter` 收集全部 → 自动建 `axum::Router`。
+//! `#[command_api]` 宏为每个命令 `inventory::submit!` 一个 [`RouteReg`] +
+//! 一个 [`RouteMeta`]，此模块用 `inventory::iter` 收集全部 → 自动建
+//! `axum::Router` + 暴露路由发现表。
 //!
 //! **E2 论点**:命令一解耦即自动出现在 REST 路由表，无 parity drift——
-//! 对侧手维护的 11 个路由文件镜像 11 个 command 文件，此处零行手写。
+//! 凡挂 `#[command_api]` 的命令零行手写即上路由表。
 
 #[cfg(feature = "rest_api")]
 pub struct RouteReg {
@@ -19,6 +20,22 @@ pub struct RouteReg {
 #[cfg(feature = "rest_api")]
 inventory::collect!(RouteReg);
 
+/// 路由元数据（供 `GET /control/v1/__routes` 发现端点 dump）。
+#[cfg(feature = "rest_api")]
+#[derive(serde::Serialize)]
+pub struct RouteMeta {
+    pub cmd: &'static str,
+    pub method: &'static str,
+    /// axum 路径形式（`:id` 动态段）
+    pub path: &'static str,
+    /// path 参名
+    #[serde(rename = "pathParams")]
+    pub path_params: &'static [&'static str],
+}
+
+#[cfg(feature = "rest_api")]
+inventory::collect!(RouteMeta);
+
 /// 收集所有 `#[command_api]` 提交的路由，建一个 axum Router（state = AppState）。
 #[cfg(feature = "rest_api")]
 #[allow(dead_code)]  // PoC：仅测试调用；正式接线后由 server setup 调用
@@ -28,6 +45,22 @@ pub fn build_router() -> axum::Router<crate::store::AppState> {
         r = (reg.mount)(r);
     }
     r
+}
+
+/// dump 全部 `#[command_api]` 路由元数据（按 cmd 排序，供发现端点）。
+#[cfg(feature = "rest_api")]
+#[allow(dead_code)]
+pub fn route_table() -> Vec<RouteMeta> {
+    let mut v: Vec<&RouteMeta> = inventory::iter::<RouteMeta>().collect();
+    v.sort_by_key(|m| m.cmd);
+    v.into_iter()
+        .map(|m| RouteMeta {
+            cmd: m.cmd,
+            method: m.method,
+            path: m.path,
+            path_params: m.path_params,
+        })
+        .collect()
 }
 
 #[cfg(all(test, feature = "rest_api"))]
