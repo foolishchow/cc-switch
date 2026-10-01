@@ -15,9 +15,11 @@ import { AutoFailoverConfigPanel } from "@/components/proxy/AutoFailoverConfigPa
 import { FailoverQueueManager } from "@/components/proxy/FailoverQueueManager";
 import { RectifierConfigPanel } from "@/components/settings/RectifierConfigPanel";
 import { GlobalProxySettings } from "@/components/settings/GlobalProxySettings";
+import { RestApiSettings } from "@/components/settings/RestApiSettings";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { ToggleRow } from "@/components/ui/toggle-row";
 import { useProxyStatus } from "@/hooks/useProxyStatus";
+import { useRestAvailable } from "@/hooks/useRest";
 import type { SettingsFormState } from "@/hooks/useSettings";
 import { getAppLabel, PROXY_APP_IDS } from "@/config/appConfig";
 
@@ -38,6 +40,7 @@ export function ProxyTabContent({
   const { t } = useTranslation();
   const [showProxyConfirm, setShowProxyConfirm] = useState(false);
   const [showFailoverConfirm, setShowFailoverConfirm] = useState(false);
+  const { data: restAvailable } = useRestAvailable();
 
   const {
     isRunning,
@@ -267,6 +270,30 @@ export function ProxyTabContent({
             <GlobalProxySettings />
           </AccordionContent>
         </AccordionItem>
+
+        {restAvailable && (
+          <AccordionItem
+            value="rest"
+            className="rounded-xl glass-card overflow-hidden"
+          >
+            <AccordionTrigger className="px-6 py-4 hover:no-underline hover:bg-muted/50 data-[state=open]:bg-muted/50">
+              <div className="flex items-center gap-3">
+                <Server className="h-5 w-5 text-primary" />
+                <div className="text-left">
+                  <h3 className="text-base font-semibold">
+                    {t("settings.advanced.restApi.title")}
+                  </h3>
+                  <p className="text-sm text-muted-foreground font-normal">
+                    {t("settings.advanced.restApi.description")}
+                  </p>
+                </div>
+              </div>
+            </AccordionTrigger>
+            <AccordionContent className="px-6 pb-6 pt-4 border-t border-border/50">
+              <RestApiSettings />
+            </AccordionContent>
+          </AccordionItem>
+        )}
       </Accordion>
 
       <ConfirmDialog

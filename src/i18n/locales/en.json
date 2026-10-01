@@ -428,6 +428,10 @@
           "debug": "Detailed info including SSE stream and request/response",
           "trace": "All logs, most verbose"
         }
+      },
+      "restApi": {
+        "title": "REST Control Plane",
+        "description": "Remote HTTP control interface (independent port, drivable via curl/scripts)"
       }
     },
     "language": "Language",
@@ -885,7 +889,18 @@
       "pricingSaveFailed": "Failed to save pricing defaults: {{error}}",
       "pricingLoadFailed": "Failed to load pricing defaults: {{error}}"
     },
-    "saveFailedGeneric": "Save failed, please try again"
+    "saveFailedGeneric": "Save failed, please try again",
+    "restApi": {
+      "hint": "The REST control plane lets external HTTP clients switch providers and control the proxy remotely. Localhost-only by default.",
+      "enable": "Enable REST control plane",
+      "saved": "REST config saved",
+      "saveFailed": "Failed to save REST config: {{error}}",
+      "tokenPlaceholder": "Bearer token (auto-generated when enabling if empty)",
+      "copy": "Copy token",
+      "regenerate": "Regenerate token",
+      "tokenRegenerated": "Token regenerated",
+      "regenerateFailed": "Failed to regenerate token: {{error}}"
+    }
   },
   "apps": {
     "claude": "Claude",
