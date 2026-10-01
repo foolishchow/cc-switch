@@ -1,27 +1,29 @@
 #![allow(non_snake_case)]
 
+use crate::error::AppError;
 use crate::session_manager;
+use cc_command_api::command_api;
 
-#[tauri::command]
-pub async fn list_sessions() -> Result<Vec<session_manager::SessionMeta>, String> {
-    let sessions = tauri::async_runtime::spawn_blocking(session_manager::scan_sessions)
+#[command_api]
+pub async fn list_sessions() -> Result<Vec<session_manager::SessionMeta>, AppError> {
+    let sessions = tokio::task::spawn_blocking(session_manager::scan_sessions)
         .await
         .map_err(|e| format!("Failed to scan sessions: {e}"))?;
     Ok(sessions)
 }
 
-#[tauri::command]
+#[command_api]
 pub async fn get_session_messages(
     providerId: String,
     sourcePath: String,
-) -> Result<Vec<session_manager::SessionMessage>, String> {
+) -> Result<Vec<session_manager::SessionMessage>, AppError> {
     let provider_id = providerId.clone();
     let source_path = sourcePath.clone();
-    tauri::async_runtime::spawn_blocking(move || {
+    Ok(tokio::task::spawn_blocking(move || {
         session_manager::load_messages(&provider_id, &source_path)
     })
     .await
-    .map_err(|e| format!("Failed to load session messages: {e}"))?
+    .map_err(|e| format!("Failed to load session messages: {e}"))??)
 }
 
 /// 在用户选定的终端里恢复一个会话。
@@ -58,6 +60,12 @@ pub async fn get_session_messages(
 /// 相比之下 `cwd` 的处理**不属于**这条豁免：它是磁盘上扫来的项目路径，正常使用
 /// 就可能含 `$(...)`，与 renderer 是否可信无关，因此在
 /// `session_manager::terminal::shell_escape` 里做了完整的单引号转义。
+///
+/// # REST 不暴露
+///
+/// 本命令刻意保留为 `#[tauri::command]`（桌面 IPC 独占），**不迁至 `#[command_api]`**：
+/// 远程 shell 执行经 HTTP 暴露（即便 token 门控）会显著放大攻击面——token 泄露
+/// 即等同 RCE。控制面 REST 仅暴露读/删类会话操作。
 #[tauri::command]
 pub async fn launch_session_terminal(
     command: String,
@@ -92,28 +100,30 @@ pub async fn launch_session_terminal(
     Ok(true)
 }
 
-#[tauri::command]
+#[command_api]
 pub async fn delete_session(
     providerId: String,
     sessionId: String,
     sourcePath: String,
-) -> Result<bool, String> {
+) -> Result<bool, AppError> {
     let provider_id = providerId.clone();
     let session_id = sessionId.clone();
     let source_path = sourcePath.clone();
 
-    tauri::async_runtime::spawn_blocking(move || {
+    Ok(tokio::task::spawn_blocking(move || {
         session_manager::delete_session(&provider_id, &session_id, &source_path)
     })
     .await
-    .map_err(|e| format!("Failed to delete session: {e}"))?
+    .map_err(|e| format!("Failed to delete session: {e}"))??)
 }
 
-#[tauri::command]
+#[command_api]
 pub async fn delete_sessions(
     items: Vec<session_manager::DeleteSessionRequest>,
-) -> Result<Vec<session_manager::DeleteSessionOutcome>, String> {
-    tauri::async_runtime::spawn_blocking(move || session_manager::delete_sessions(&items))
-        .await
-        .map_err(|e| format!("Failed to delete sessions: {e}"))
+) -> Result<Vec<session_manager::DeleteSessionOutcome>, AppError> {
+    Ok(
+        tokio::task::spawn_blocking(move || session_manager::delete_sessions(&items))
+            .await
+            .map_err(|e| format!("Failed to delete sessions: {e}"))?,
+    )
 }

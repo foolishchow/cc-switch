@@ -503,6 +503,11 @@ pub struct AppSettings {
     // ===== 本机自动迁移状态 =====
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub local_migrations: Option<LocalMigrations>,
+
+    // ===== REST 控制面配置 =====
+    /// REST 控制面配置（`restApi` 段）。`rest_api` feature off 时仅作存储不生效。
+    #[serde(default)]
+    pub rest_api: crate::rest::RestConfig,
 }
 
 fn default_show_in_tray() -> bool {
@@ -571,6 +576,7 @@ impl Default for AppSettings {
             backup_retain_count: None,
             preferred_terminal: None,
             local_migrations: None,
+            rest_api: Default::default(),
         }
     }
 }

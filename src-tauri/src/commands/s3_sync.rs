@@ -1,7 +1,6 @@
 #![allow(non_snake_case)]
 
 use serde_json::{json, Value};
-use tauri::State;
 
 use crate::commands::sync_support::{
     attach_warning, post_sync_warning_from_result, run_post_import_sync,
@@ -10,6 +9,7 @@ use crate::error::AppError;
 use crate::services::s3_sync as s3_sync_service;
 use crate::settings::{self, S3SyncSettings};
 use crate::store::AppState;
+use cc_command_api::command_api;
 
 fn persist_sync_error(settings: &mut S3SyncSettings, error: &AppError, source: &str) {
     settings.status.last_error = Some(error.to_string());
@@ -96,38 +96,36 @@ where
     }
 }
 
-#[tauri::command]
+#[command_api]
 pub async fn s3_test_connection(
     settings: S3SyncSettings,
-    #[allow(non_snake_case)] preserveEmptyPassword: Option<bool>,
-) -> Result<Value, String> {
+    preserveEmptyPassword: Option<bool>,
+) -> Result<Value, AppError> {
     let preserve_empty = preserveEmptyPassword.unwrap_or(true);
     let resolved =
         resolve_secret_for_request(settings, settings::get_s3_sync_settings(), preserve_empty);
-    s3_sync_service::check_connection(&resolved)
-        .await
-        .map_err(|e| e.to_string())?;
+    s3_sync_service::check_connection(&resolved).await?;
     Ok(json!({
         "success": true,
         "message": "S3 connection ok"
     }))
 }
 
-#[tauri::command]
-pub async fn s3_sync_upload(state: State<'_, AppState>) -> Result<Value, String> {
+#[command_api]
+pub async fn s3_sync_upload(state: &AppState) -> Result<Value, AppError> {
     let db = state.db.clone();
     let mut settings = require_enabled_s3_settings()?;
 
     let result = run_with_s3_lock(s3_sync_service::upload(&db, &mut settings)).await;
-    map_sync_result(result, |error| {
+    Ok(map_sync_result(result, |error| {
         persist_sync_error(&mut settings, error, "manual")
-    })
+    })?)
 }
 
-#[tauri::command]
-pub async fn s3_sync_download(state: State<'_, AppState>) -> Result<Value, String> {
+#[command_api]
+pub async fn s3_sync_download(state: &AppState) -> Result<Value, AppError> {
     let db = state.db.clone();
-    let app_state_for_sync = state.inner().clone();
+    let app_state_for_sync = state.clone();
     let mut settings = require_enabled_s3_settings()?;
 
     // Keep the derived live configuration refresh in the same global sync
@@ -136,11 +134,10 @@ pub async fn s3_sync_download(state: State<'_, AppState>) -> Result<Value, Strin
     let sync_result = run_download_with_s3_lock(
         s3_sync_service::download(&db, &mut settings),
         |result| async move {
-            let post_sync_result = tauri::async_runtime::spawn_blocking(move || {
-                run_post_import_sync(&app_state_for_sync)
-            })
-            .await
-            .map_err(|e| e.to_string());
+            let post_sync_result =
+                tokio::task::spawn_blocking(move || run_post_import_sync(&app_state_for_sync))
+                    .await
+                    .map_err(|e| e.to_string());
             Ok((result, post_sync_result))
         },
     )
@@ -159,11 +156,11 @@ pub async fn s3_sync_download(state: State<'_, AppState>) -> Result<Value, Strin
     Ok(result)
 }
 
-#[tauri::command]
+#[command_api]
 pub async fn s3_sync_save_settings(
     settings: S3SyncSettings,
-    #[allow(non_snake_case)] passwordTouched: Option<bool>,
-) -> Result<Value, String> {
+    passwordTouched: Option<bool>,
+) -> Result<Value, AppError> {
     let password_touched = passwordTouched.unwrap_or(false);
     let existing = settings::get_s3_sync_settings();
     let mut sync_settings =
@@ -180,8 +177,8 @@ pub async fn s3_sync_save_settings(
     Ok(json!({ "success": true }))
 }
 
-#[tauri::command]
-pub async fn s3_sync_fetch_remote_info() -> Result<Value, String> {
+#[command_api]
+pub async fn s3_sync_fetch_remote_info() -> Result<Value, AppError> {
     let settings = require_enabled_s3_settings()?;
     let info = s3_sync_service::fetch_remote_info(&settings)
         .await

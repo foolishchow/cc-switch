@@ -1035,14 +1035,14 @@ pub(crate) async fn refresh_all_usage_in_tray(app: &tauri::AppHandle) {
                 let result = match source {
                     TrayUsageSource::ManagedCodex(account_id) => {
                         let codex_state = app.state::<crate::commands::CodexOAuthState>();
-                        crate::commands::get_codex_oauth_quota(
-                            app_clone,
-                            state,
+                        crate::commands::get_codex_oauth_quota_impl(
+                            state.inner(),
                             Some(account_id),
-                            codex_state,
+                            codex_state.inner(),
                         )
                         .await
                         .map(|_| ())
+                        .map_err(|e| e.to_string())
                     }
                     TrayUsageSource::Script => crate::commands::queryProviderUsage(
                         app_clone,

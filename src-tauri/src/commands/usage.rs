@@ -4,12 +4,15 @@ use crate::error::AppError;
 use crate::services::model_pricing::{ModelPricingInfo, ModelsDevSyncConfig, ModelsDevSyncState};
 use crate::services::usage_stats::*;
 use crate::store::AppState;
-use tauri::State;
+use cc_command_api::command_api;
 
 /// 获取使用量汇总
-#[tauri::command]
+#[command_api(
+    rest = "GET /control/v1/usage/summary",
+    query = "start_date,end_date,app_type,provider_name,model"
+)]
 pub fn get_usage_summary(
-    state: State<'_, AppState>,
+    state: &AppState,
     start_date: Option<i64>,
     end_date: Option<i64>,
     app_type: Option<String>,
@@ -26,9 +29,12 @@ pub fn get_usage_summary(
 }
 
 /// 获取按 app_type 拆分的使用量汇总
-#[tauri::command]
+#[command_api(
+    rest = "GET /control/v1/usage/summary-by-app",
+    query = "start_date,end_date,provider_name,model"
+)]
 pub fn get_usage_summary_by_app(
-    state: State<'_, AppState>,
+    state: &AppState,
     start_date: Option<i64>,
     end_date: Option<i64>,
     provider_name: Option<String>,
@@ -43,9 +49,12 @@ pub fn get_usage_summary_by_app(
 }
 
 /// 获取每日趋势
-#[tauri::command]
+#[command_api(
+    rest = "GET /control/v1/usage/trends",
+    query = "start_date,end_date,app_type,provider_name,model"
+)]
 pub fn get_usage_trends(
-    state: State<'_, AppState>,
+    state: &AppState,
     start_date: Option<i64>,
     end_date: Option<i64>,
     app_type: Option<String>,
@@ -62,9 +71,9 @@ pub fn get_usage_trends(
 }
 
 /// 获取 Provider 统计
-#[tauri::command]
+#[command_api]
 pub fn get_provider_stats(
-    state: State<'_, AppState>,
+    state: &AppState,
     start_date: Option<i64>,
     end_date: Option<i64>,
     app_type: Option<String>,
@@ -81,9 +90,9 @@ pub fn get_provider_stats(
 }
 
 /// 获取模型统计
-#[tauri::command]
+#[command_api]
 pub fn get_model_stats(
-    state: State<'_, AppState>,
+    state: &AppState,
     start_date: Option<i64>,
     end_date: Option<i64>,
     app_type: Option<String>,
@@ -100,9 +109,9 @@ pub fn get_model_stats(
 }
 
 /// 获取请求日志列表
-#[tauri::command]
+#[command_api]
 pub fn get_request_logs(
-    state: State<'_, AppState>,
+    state: &AppState,
     filters: LogFilters,
     page: u32,
     page_size: u32,
@@ -111,17 +120,17 @@ pub fn get_request_logs(
 }
 
 /// 获取单个请求详情
-#[tauri::command]
+#[command_api]
 pub fn get_request_detail(
-    state: State<'_, AppState>,
+    state: &AppState,
     request_id: String,
 ) -> Result<Option<RequestLogDetail>, AppError> {
     state.db.get_request_detail(&request_id)
 }
 
 /// 获取模型定价列表
-#[tauri::command]
-pub fn get_model_pricing(state: State<'_, AppState>) -> Result<Vec<ModelPricingInfo>, AppError> {
+#[command_api]
+pub fn get_model_pricing(state: &AppState) -> Result<Vec<ModelPricingInfo>, AppError> {
     log::info!("获取模型定价列表");
     state.db.ensure_model_pricing_seeded()?;
     crate::services::model_pricing::sync_local_model_pricing(&state.db)?;
@@ -171,9 +180,9 @@ pub fn get_model_pricing(state: State<'_, AppState>) -> Result<Vec<ModelPricingI
 }
 
 /// 更新模型定价
-#[tauri::command]
+#[command_api]
 pub fn update_model_pricing(
-    state: State<'_, AppState>,
+    state: &AppState,
     model_id: String,
     display_name: String,
     input_cost: String,
@@ -196,32 +205,30 @@ pub fn update_model_pricing(
 }
 
 /// 批量更新模型定价（models.dev 自动同步仅触发一次历史成本回填）
-#[tauri::command]
+#[command_api]
 pub fn update_model_pricing_batch(
-    state: State<'_, AppState>,
+    state: &AppState,
     entries: Vec<ModelPricingInfo>,
 ) -> Result<usize, AppError> {
     crate::services::model_pricing::update_model_pricing_batch(&state.db, entries)
 }
 
-#[tauri::command]
-pub fn get_models_dev_sync_config(
-    state: State<'_, AppState>,
-) -> Result<ModelsDevSyncState, AppError> {
+#[command_api]
+pub fn get_models_dev_sync_config(state: &AppState) -> Result<ModelsDevSyncState, AppError> {
     crate::services::model_pricing::get_models_dev_sync_state(&state.db)
 }
 
-#[tauri::command]
+#[command_api]
 pub fn save_models_dev_sync_config(
-    state: State<'_, AppState>,
+    state: &AppState,
     config: ModelsDevSyncConfig,
 ) -> Result<(), AppError> {
     crate::services::model_pricing::save_models_dev_sync_config(&state.db, config)
 }
 
-#[tauri::command]
+#[command_api]
 pub fn record_models_dev_sync_result(
-    state: State<'_, AppState>,
+    state: &AppState,
     synced_at: Option<i64>,
     error: Option<String>,
 ) -> Result<(), AppError> {
@@ -229,9 +236,9 @@ pub fn record_models_dev_sync_result(
 }
 
 /// 检查 Provider 使用限额
-#[tauri::command]
+#[command_api]
 pub fn check_provider_limits(
-    state: State<'_, AppState>,
+    state: &AppState,
     provider_id: String,
     app_type: String,
 ) -> Result<crate::services::usage_stats::ProviderLimitStatus, AppError> {
@@ -239,27 +246,25 @@ pub fn check_provider_limits(
 }
 
 /// 删除模型定价
-#[tauri::command]
-pub fn delete_model_pricing(state: State<'_, AppState>, model_id: String) -> Result<(), AppError> {
+#[command_api]
+pub fn delete_model_pricing(state: &AppState, model_id: String) -> Result<(), AppError> {
     crate::services::model_pricing::delete_model_pricing(&state.db, &model_id)?;
     log::info!("已删除模型定价: {model_id}");
     Ok(())
 }
 
 /// 手动触发会话日志同步
-#[tauri::command]
+#[command_api]
 pub async fn sync_session_usage(
-    state: State<'_, AppState>,
+    state: &AppState,
 ) -> Result<crate::services::session_usage::SessionSyncResult, AppError> {
     let db = state.db.clone();
     let _guard = crate::services::session_usage::session_sync_mutex()
         .lock()
         .await;
-    tauri::async_runtime::spawn_blocking(move || {
-        crate::services::session_usage::sync_all_unlocked(&db)
-    })
-    .await
-    .map_err(|error| AppError::Message(format!("会话用量同步任务失败: {error}")))
+    tokio::task::spawn_blocking(move || crate::services::session_usage::sync_all_unlocked(&db))
+        .await
+        .map_err(|error| AppError::Message(format!("会话用量同步任务失败: {error}")))
 }
 
 /// Codex reset 成功后，无论重导是否导入新行或返回错误，都必须通知前端刷新。
@@ -273,15 +278,15 @@ fn finish_codex_rebuild(
 
 /// 备份数据库后，仅重建 Codex session 用量。锁覆盖 backup → reset → import
 /// 整个序列，避免后台同步在清理和重导之间插入数据。
-#[tauri::command]
+#[command_api]
 pub async fn rebuild_codex_usage(
-    state: State<'_, AppState>,
+    state: &AppState,
 ) -> Result<crate::services::session_usage::SessionSyncResult, AppError> {
     let db = state.db.clone();
     let _guard = crate::services::session_usage::session_sync_mutex()
         .lock()
         .await;
-    tauri::async_runtime::spawn_blocking(move || {
+    tokio::task::spawn_blocking(move || {
         db.backup_database_file()?;
         db.reset_codex_usage()?;
         let result = crate::services::session_usage_codex::sync_codex_usage(&db);
@@ -292,9 +297,9 @@ pub async fn rebuild_codex_usage(
 }
 
 /// 获取数据来源分布
-#[tauri::command]
+#[command_api]
 pub fn get_usage_data_sources(
-    state: State<'_, AppState>,
+    state: &AppState,
 ) -> Result<Vec<crate::services::session_usage::DataSourceSummary>, AppError> {
     crate::services::session_usage::get_data_source_breakdown(&state.db)
 }

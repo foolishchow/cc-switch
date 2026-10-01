@@ -1,16 +1,16 @@
-use tauri::State;
-
+use crate::error::AppError;
 use crate::services::omo::{OmoLocalFileData, SLIM, STANDARD};
 use crate::services::OmoService;
 use crate::store::AppState;
+use cc_command_api::command_api;
 
-#[tauri::command]
-pub async fn read_omo_local_file() -> Result<OmoLocalFileData, String> {
-    OmoService::read_local_file(&STANDARD).map_err(|e| e.to_string())
+#[command_api]
+pub async fn read_omo_local_file() -> Result<OmoLocalFileData, AppError> {
+    OmoService::read_local_file(&STANDARD)
 }
 
-#[tauri::command]
-pub async fn get_current_omo_provider_id(state: State<'_, AppState>) -> Result<String, String> {
+#[command_api]
+pub async fn get_current_omo_provider_id(state: &AppState) -> Result<String, AppError> {
     let provider = state
         .db
         .get_current_omo_provider("opencode", "omo")
@@ -18,8 +18,8 @@ pub async fn get_current_omo_provider_id(state: State<'_, AppState>) -> Result<S
     Ok(provider.map(|p| p.id).unwrap_or_default())
 }
 
-#[tauri::command]
-pub async fn disable_current_omo(state: State<'_, AppState>) -> Result<(), String> {
+#[command_api]
+pub async fn disable_current_omo(state: &AppState) -> Result<(), AppError> {
     let providers = state
         .db
         .get_all_providers("opencode")
@@ -32,21 +32,18 @@ pub async fn disable_current_omo(state: State<'_, AppState>) -> Result<(), Strin
                 .map_err(|e| e.to_string())?;
         }
     }
-    OmoService::delete_config_file(&STANDARD).map_err(|e| e.to_string())?;
-    Ok(())
+    OmoService::delete_config_file(&STANDARD)
 }
 
 // ── OMO Slim commands ───────────────────────────────────────
 
-#[tauri::command]
-pub async fn read_omo_slim_local_file() -> Result<OmoLocalFileData, String> {
-    OmoService::read_local_file(&SLIM).map_err(|e| e.to_string())
+#[command_api]
+pub async fn read_omo_slim_local_file() -> Result<OmoLocalFileData, AppError> {
+    OmoService::read_local_file(&SLIM)
 }
 
-#[tauri::command]
-pub async fn get_current_omo_slim_provider_id(
-    state: State<'_, AppState>,
-) -> Result<String, String> {
+#[command_api]
+pub async fn get_current_omo_slim_provider_id(state: &AppState) -> Result<String, AppError> {
     let provider = state
         .db
         .get_current_omo_provider("opencode", "omo-slim")
@@ -54,8 +51,8 @@ pub async fn get_current_omo_slim_provider_id(
     Ok(provider.map(|p| p.id).unwrap_or_default())
 }
 
-#[tauri::command]
-pub async fn disable_current_omo_slim(state: State<'_, AppState>) -> Result<(), String> {
+#[command_api]
+pub async fn disable_current_omo_slim(state: &AppState) -> Result<(), AppError> {
     let providers = state
         .db
         .get_all_providers("opencode")
@@ -68,6 +65,5 @@ pub async fn disable_current_omo_slim(state: State<'_, AppState>) -> Result<(), 
                 .map_err(|e| e.to_string())?;
         }
     }
-    OmoService::delete_config_file(&SLIM).map_err(|e| e.to_string())?;
-    Ok(())
+    OmoService::delete_config_file(&SLIM)
 }

@@ -2,16 +2,17 @@
 
 mod auth;
 mod balance;
-mod codex_oauth;
+pub(crate) mod codex_oauth;
 mod coding_plan;
-mod config;
-mod copilot;
+// WEB-PATCH: pub(crate) for REST config-dir route reuse (visibility only)
+pub(crate) mod config;
+pub(crate) mod copilot;
 mod deeplink;
 mod env;
 mod failover;
 mod global_proxy;
 mod hermes;
-mod import_export;
+pub(crate) mod import_export;
 mod mcp;
 mod misc;
 mod model_fetch;
@@ -24,12 +25,13 @@ mod prompt;
 mod provider;
 mod proxy;
 mod session_manager;
-mod settings;
+// WEB-PATCH: pub(crate) for REST settings route reuse (visibility only)
+pub(crate) mod settings;
 pub mod skill;
 mod stream_check;
 mod subscription;
-mod sync_support;
-mod xai_oauth;
+pub(crate) mod sync_support;
+pub(crate) mod xai_oauth;
 
 mod lightweight;
 mod s3_sync;

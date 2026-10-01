@@ -34,6 +34,9 @@ mod prompt;
 mod prompt_files;
 mod provider;
 mod proxy;
+mod rest;
+#[cfg(feature = "rest_api")]
+mod rest_registry;
 mod services;
 mod session_manager;
 mod settings;
@@ -1156,20 +1159,49 @@ pub fn run() {
             // 将同一个实例注入到全局状态，避免重复创建导致的不一致
             app.manage(app_state);
 
-            // 初始化 SkillService
-            let skill_service = SkillService::new();
-            app.manage(commands::skill::SkillServiceState(Arc::new(skill_service)));
+            // 初始化 SkillService（在 REST 控制面之前，以便共享同一 Arc）
+            let skill_service = std::sync::Arc::new(SkillService::new());
+            app.manage(commands::skill::SkillServiceState(skill_service.clone()));
 
-            // 初始化 CopilotAuthManager
-            {
+            // 初始化 CopilotAuthManager（在 REST 控制面之前，以便共享同一 Arc）
+            let copilot_auth = {
                 use crate::proxy::providers::copilot_auth::CopilotAuthManager;
-                use commands::CopilotAuthState;
                 use tokio::sync::RwLock;
+                std::sync::Arc::new(RwLock::new(CopilotAuthManager::new(
+                    crate::config::get_app_config_dir(),
+                )))
+            };
+            app.manage(commands::CopilotAuthState(copilot_auth.clone()));
+            log::info!("✓ CopilotAuthManager initialized");
 
-                let app_config_dir = crate::config::get_app_config_dir();
-                let copilot_auth_manager = CopilotAuthManager::new(app_config_dir);
-                app.manage(CopilotAuthState(Arc::new(RwLock::new(copilot_auth_manager))));
-                log::info!("✓ CopilotAuthManager initialized");
+            // 初始化 xAI OAuthManager（在 REST 控制面之前，以便共享同一 Arc）
+            let xai_oauth = {
+                use crate::proxy::providers::xai_oauth_auth::XaiOAuthManager;
+                use tokio::sync::RwLock;
+                std::sync::Arc::new(RwLock::new(XaiOAuthManager::new(
+                    crate::config::get_app_config_dir(),
+                )))
+            };
+            app.manage(commands::XaiOAuthState(xai_oauth.clone()));
+            log::info!("✓ XaiOAuthManager initialized");
+
+            // REST 控制面（rest_api feature-gated）
+            #[cfg(feature = "rest_api")]
+            {
+                let rest_state = crate::rest::service::RestState {
+                    app: app.state::<crate::store::AppState>().inner().clone(),
+                    skill: skill_service.clone(),
+                    copilot: copilot_auth.clone(),
+                    xai: xai_oauth.clone(),
+                };
+                let rest_service = crate::rest::service::RestService::new(rest_state);
+                app.manage(rest_service.clone());
+                let rs = rest_service.clone();
+                tauri::async_runtime::spawn(async move {
+                    if let Err(e) = rs.start().await {
+                        log::warn!("[REST] 控制面启动失败: {e}");
+                    }
+                });
             }
 
             // 初始化 CodexOAuthManager (ChatGPT Plus/Pro 反代)
@@ -1180,18 +1212,6 @@ pub fn run() {
                     app.state::<AppState>().codex_oauth_manager.clone();
                 app.manage(CodexOAuthState(codex_oauth_manager));
                 log::info!("✓ CodexOAuthManager initialized");
-            }
-
-            // 初始化 xAI OAuthManager (Grok API 反代)
-            {
-                use crate::proxy::providers::xai_oauth_auth::XaiOAuthManager;
-                use commands::XaiOAuthState;
-                use tokio::sync::RwLock;
-
-                let app_config_dir = crate::config::get_app_config_dir();
-                let xai_oauth_manager = XaiOAuthManager::new(app_config_dir);
-                app.manage(XaiOAuthState(Arc::new(RwLock::new(xai_oauth_manager))));
-                log::info!("✓ XaiOAuthManager initialized");
             }
 
             // 初始化全局出站代理 HTTP 客户端
@@ -1714,6 +1734,13 @@ pub fn run() {
             commands::enter_lightweight_mode,
             commands::exit_lightweight_mode,
             commands::is_lightweight_mode,
+            // REST control plane (rest_api feature-gated)
+            #[cfg(feature = "rest_api")]
+            crate::rest::commands::get_rest_config,
+            #[cfg(feature = "rest_api")]
+            crate::rest::commands::set_rest_config,
+            #[cfg(feature = "rest_api")]
+            crate::rest::commands::regenerate_rest_token,
         ]);
 
     let app = builder

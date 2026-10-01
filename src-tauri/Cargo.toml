@@ -18,11 +18,14 @@ doctest = false
 [features]
 default = []
 test-hooks = []
+rest_api = ["dep:rust-embed", "inventory"]
 
 [build-dependencies]
 tauri-build = { version = "2.4.0", features = [] }
 
 [dependencies]
+cc-command-api = { path = "../crates/cc-command-api" }
+inventory = { version = "0.3", optional = true }
 serde_json = { version = "1.0", features = ["preserve_order"] }
 serde = { version = "1.0", features = ["derive"] }
 log = "0.4"
@@ -50,7 +53,8 @@ async-stream = "0.3"
 bytes = "1.5"
 axum = "0.7"
 tower = "0.4"
-tower-http = { version = "0.5", features = ["cors"] }
+tower-http = { version = "0.5", features = ["cors", "fs"] }
+rust-embed = { version = "8", optional = true }
 hyper = { version = "1.0", features = ["full"] }
 hyper-util = { version = "0.1", features = ["tokio", "http1", "client-legacy"] }
 hyper-rustls = { version = "0.27", features = ["http1", "tls12", "ring", "webpki-tokio"] }

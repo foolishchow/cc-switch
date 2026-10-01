@@ -1,17 +1,19 @@
 #![allow(non_snake_case)]
 
-use tauri::{AppHandle, State};
+use cc_command_api::command_api;
+use tauri::AppHandle;
 use tauri_plugin_dialog::DialogExt;
 use tauri_plugin_opener::OpenerExt;
 
 use crate::app_config::AppType;
 use crate::codex_config;
 use crate::config::{self, get_claude_settings_path, ConfigStatus};
+use crate::error::AppError;
 use crate::settings;
 use crate::store::AppState;
 
-#[tauri::command]
-pub async fn get_claude_config_status() -> Result<ConfigStatus, String> {
+#[command_api]
+pub async fn get_claude_config_status() -> Result<ConfigStatus, AppError> {
     Ok(config::get_claude_config_status())
 }
 
@@ -62,12 +64,9 @@ fn validate_common_config_snippet(app_type: &str, snippet: &str) -> Result<(), S
     Ok(())
 }
 
-#[tauri::command]
-pub async fn get_config_status(
-    state: State<'_, AppState>,
-    app: String,
-) -> Result<ConfigStatus, String> {
-    match AppType::from_str(&app).map_err(|e| e.to_string())? {
+#[command_api]
+pub async fn get_config_status(state: &AppState, app: String) -> Result<ConfigStatus, AppError> {
+    match AppType::from_str(&app)? {
         AppType::Claude => Ok(config::get_claude_config_status()),
         AppType::ClaudeDesktop => {
             let status = crate::claude_desktop_config::get_status(
@@ -157,14 +156,14 @@ pub async fn get_config_status(
     }
 }
 
-#[tauri::command]
-pub async fn get_claude_code_config_path() -> Result<String, String> {
+#[command_api]
+pub async fn get_claude_code_config_path() -> Result<String, AppError> {
     Ok(get_claude_settings_path().to_string_lossy().to_string())
 }
 
-#[tauri::command]
-pub async fn get_config_dir(app: String) -> Result<String, String> {
-    let dir = match AppType::from_str(&app).map_err(|e| e.to_string())? {
+#[command_api(rest = "GET /control/v1/config-dir", query = "app")]
+pub async fn get_config_dir(app: String) -> Result<String, AppError> {
+    let dir = match AppType::from_str(&app)? {
         AppType::Claude => config::get_claude_config_dir(),
         AppType::ClaudeDesktop => {
             crate::claude_desktop_config::get_config_library_path().map_err(|e| e.to_string())?
@@ -248,8 +247,8 @@ pub async fn pick_directory(
     }
 }
 
-#[tauri::command]
-pub async fn get_app_config_path() -> Result<String, String> {
+#[command_api]
+pub async fn get_app_config_path() -> Result<String, AppError> {
     let config_path = config::get_app_config_path();
     Ok(config_path.to_string_lossy().to_string())
 }
@@ -270,21 +269,21 @@ pub async fn open_app_config_folder(handle: AppHandle) -> Result<bool, String> {
     Ok(true)
 }
 
-#[tauri::command]
+#[command_api]
 pub async fn get_claude_common_config_snippet(
-    state: tauri::State<'_, crate::store::AppState>,
-) -> Result<Option<String>, String> {
-    state
+    state: &AppState,
+) -> Result<Option<String>, AppError> {
+    Ok(state
         .db
         .get_config_snippet("claude")
-        .map_err(|e| e.to_string())
+        .map_err(|e| e.to_string())?)
 }
 
-#[tauri::command]
+#[command_api]
 pub async fn set_claude_common_config_snippet(
     snippet: String,
-    state: tauri::State<'_, crate::store::AppState>,
-) -> Result<(), String> {
+    state: &AppState,
+) -> Result<(), AppError> {
     let is_cleared = snippet.trim().is_empty();
 
     if !snippet.trim().is_empty() {
@@ -304,23 +303,23 @@ pub async fn set_claude_common_config_snippet(
     Ok(())
 }
 
-#[tauri::command]
+#[command_api]
 pub async fn get_common_config_snippet(
     app_type: String,
-    state: tauri::State<'_, crate::store::AppState>,
-) -> Result<Option<String>, String> {
-    state
+    state: &AppState,
+) -> Result<Option<String>, AppError> {
+    Ok(state
         .db
         .get_config_snippet(&app_type)
-        .map_err(|e| e.to_string())
+        .map_err(|e| e.to_string())?)
 }
 
-#[tauri::command]
+#[command_api]
 pub async fn set_common_config_snippet(
     app_type: String,
     snippet: String,
-    state: tauri::State<'_, crate::store::AppState>,
-) -> Result<(), String> {
+    state: &AppState,
+) -> Result<(), AppError> {
     let is_cleared = snippet.trim().is_empty();
 
     validate_common_config_snippet(&app_type, &snippet)?;
@@ -345,11 +344,8 @@ pub async fn set_common_config_snippet(
             .map_err(|e| e.to_string())?
             .is_some()
     {
-        crate::services::OmoService::write_config_to_file(
-            state.inner(),
-            &crate::services::omo::STANDARD,
-        )
-        .map_err(|e| e.to_string())?;
+        crate::services::OmoService::write_config_to_file(state, &crate::services::omo::STANDARD)
+            .map_err(|e| e.to_string())?;
     }
     if app_type == "omo-slim"
         && state
@@ -358,11 +354,8 @@ pub async fn set_common_config_snippet(
             .map_err(|e| e.to_string())?
             .is_some()
     {
-        crate::services::OmoService::write_config_to_file(
-            state.inner(),
-            &crate::services::omo::SLIM,
-        )
-        .map_err(|e| e.to_string())?;
+        crate::services::OmoService::write_config_to_file(state, &crate::services::omo::SLIM)
+            .map_err(|e| e.to_string())?;
     }
     Ok(())
 }
@@ -388,25 +381,27 @@ mod tests {
     }
 }
 
-#[tauri::command]
+#[command_api]
 pub async fn extract_common_config_snippet(
     appType: String,
     settingsConfig: Option<String>,
-    state: tauri::State<'_, crate::store::AppState>,
-) -> Result<String, String> {
-    let app = AppType::from_str(&appType).map_err(|e| e.to_string())?;
+    state: &AppState,
+) -> Result<String, AppError> {
+    let app = AppType::from_str(&appType)?;
 
     if let Some(settings_config) = settingsConfig.filter(|s| !s.trim().is_empty()) {
         let settings: serde_json::Value =
             serde_json::from_str(&settings_config).map_err(invalid_json_format_error)?;
 
-        return crate::services::provider::ProviderService::extract_common_config_snippet_from_settings(
+        return Ok(crate::services::provider::ProviderService::extract_common_config_snippet_from_settings(
             app,
             &settings,
         )
-        .map_err(|e| e.to_string());
+        .map_err(|e| e.to_string())?);
     }
 
-    crate::services::provider::ProviderService::extract_common_config_snippet(&state, app)
-        .map_err(|e| e.to_string())
+    Ok(
+        crate::services::provider::ProviderService::extract_common_config_snippet(state, app)
+            .map_err(|e| e.to_string())?,
+    )
 }

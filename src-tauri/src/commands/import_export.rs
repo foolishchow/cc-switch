@@ -2,7 +2,6 @@
 
 use serde_json::{json, Value};
 use std::path::PathBuf;
-use tauri::State;
 use tauri_plugin_dialog::DialogExt;
 
 use crate::commands::sync_support::{
@@ -15,8 +14,9 @@ use crate::services::provider::ProviderService;
 use crate::services::skill::skill_state_write_guard;
 use crate::services::sync_protocol::sync_mutex;
 use crate::store::AppState;
+use cc_command_api::command_api;
 
-async fn run_with_database_restore_lock<T, Start, Fut>(start_operation: Start) -> T
+pub(crate) async fn run_with_database_restore_lock<T, Start, Fut>(start_operation: Start) -> T
 where
     Start: FnOnce() -> Fut,
     Fut: std::future::Future<Output = T>,
@@ -28,13 +28,10 @@ where
 // ─── File import/export ──────────────────────────────────────
 
 /// 导出数据库为 SQL 备份
-#[tauri::command]
-pub async fn export_config_to_file(
-    #[allow(non_snake_case)] filePath: String,
-    state: State<'_, AppState>,
-) -> Result<Value, String> {
+#[command_api]
+pub async fn export_config_to_file(filePath: String, state: &AppState) -> Result<Value, AppError> {
     let db = state.db.clone();
-    tauri::async_runtime::spawn_blocking(move || {
+    tokio::task::spawn_blocking(move || {
         let target_path = PathBuf::from(&filePath);
         db.export_sql(&target_path)?;
         Ok::<_, AppError>(json!({
@@ -45,19 +42,18 @@ pub async fn export_config_to_file(
     })
     .await
     .map_err(|e| format!("导出配置失败: {e}"))?
-    .map_err(|e: AppError| e.to_string())
 }
 
 /// 从 SQL 备份导入数据库
-#[tauri::command]
+#[command_api]
 pub async fn import_config_from_file(
-    #[allow(non_snake_case)] filePath: String,
-    state: State<'_, AppState>,
-) -> Result<Value, String> {
-    let app_state_for_sync = state.inner().clone();
+    filePath: String,
+    state: &AppState,
+) -> Result<Value, AppError> {
+    let app_state_for_sync = state.clone();
     let db = app_state_for_sync.db.clone();
     run_with_database_restore_lock(move || {
-        tauri::async_runtime::spawn_blocking(move || {
+        tokio::task::spawn_blocking(move || {
             let path_buf = PathBuf::from(&filePath);
             let backup_id = {
                 // SQL restore replaces the `skills` table. Exclude local Skill
@@ -75,13 +71,12 @@ pub async fn import_config_from_file(
     })
     .await
     .map_err(|e| format!("导入配置失败: {e}"))?
-    .map_err(|e: AppError| e.to_string())
 }
 
-#[tauri::command]
-pub async fn sync_current_providers_live(state: State<'_, AppState>) -> Result<Value, String> {
+#[command_api]
+pub async fn sync_current_providers_live(state: &AppState) -> Result<Value, AppError> {
     let db = state.db.clone();
-    tauri::async_runtime::spawn_blocking(move || {
+    tokio::task::spawn_blocking(move || {
         let app_state = AppState::new(db);
         ProviderService::sync_current_to_live(&app_state)?;
         Ok::<_, AppError>(json!({
@@ -91,7 +86,6 @@ pub async fn sync_current_providers_live(state: State<'_, AppState>) -> Result<V
     })
     .await
     .map_err(|e| format!("同步当前供应商失败: {e}"))?
-    .map_err(|e: AppError| e.to_string())
 }
 
 // ─── File dialogs ────────────────────────────────────────────
@@ -143,10 +137,10 @@ pub async fn open_zip_file_dialog<R: tauri::Runtime>(
 // ─── Database backup management ─────────────────────────────
 
 /// Manually create a database backup
-#[tauri::command]
-pub async fn create_db_backup(state: State<'_, AppState>) -> Result<String, String> {
+#[command_api]
+pub async fn create_db_backup(state: &AppState) -> Result<String, AppError> {
     let db = state.db.clone();
-    tauri::async_runtime::spawn_blocking(move || match db.backup_database_file()? {
+    tokio::task::spawn_blocking(move || match db.backup_database_file()? {
         Some(path) => Ok(path
             .file_name()
             .map(|f| f.to_string_lossy().into_owned())
@@ -157,25 +151,21 @@ pub async fn create_db_backup(state: State<'_, AppState>) -> Result<String, Stri
     })
     .await
     .map_err(|e| format!("Backup failed: {e}"))?
-    .map_err(|e: AppError| e.to_string())
 }
 
 /// List all database backup files
-#[tauri::command]
-pub fn list_db_backups() -> Result<Vec<BackupEntry>, String> {
-    Database::list_backups().map_err(|e| e.to_string())
+#[command_api]
+pub fn list_db_backups() -> Result<Vec<BackupEntry>, AppError> {
+    Ok(Database::list_backups().map_err(|e| e.to_string())?)
 }
 
 /// Restore database from a backup file
-#[tauri::command]
-pub async fn restore_db_backup(
-    state: State<'_, AppState>,
-    filename: String,
-) -> Result<String, String> {
-    let app_state_for_sync = state.inner().clone();
+#[command_api]
+pub async fn restore_db_backup(state: &AppState, filename: String) -> Result<String, AppError> {
+    let app_state_for_sync = state.clone();
     let db = app_state_for_sync.db.clone();
     run_with_database_restore_lock(move || {
-        tauri::async_runtime::spawn_blocking(move || {
+        tokio::task::spawn_blocking(move || {
             let restored = {
                 let _skill_state_guard = skill_state_write_guard();
                 db.restore_from_backup(&filename)?
@@ -192,22 +182,18 @@ pub async fn restore_db_backup(
     })
     .await
     .map_err(|e| format!("Restore failed: {e}"))?
-    .map_err(|e: AppError| e.to_string())
 }
 
 /// Rename a database backup file
-#[tauri::command]
-pub fn rename_db_backup(
-    #[allow(non_snake_case)] oldFilename: String,
-    #[allow(non_snake_case)] newName: String,
-) -> Result<String, String> {
-    Database::rename_backup(&oldFilename, &newName).map_err(|e| e.to_string())
+#[command_api]
+pub fn rename_db_backup(oldFilename: String, newName: String) -> Result<String, AppError> {
+    Ok(Database::rename_backup(&oldFilename, &newName).map_err(|e| e.to_string())?)
 }
 
 /// Delete a database backup file
-#[tauri::command]
-pub fn delete_db_backup(filename: String) -> Result<(), String> {
-    Database::delete_backup(&filename).map_err(|e| e.to_string())
+#[command_api]
+pub fn delete_db_backup(filename: String) -> Result<(), AppError> {
+    Ok(Database::delete_backup(&filename).map_err(|e| e.to_string())?)
 }
 
 #[cfg(test)]

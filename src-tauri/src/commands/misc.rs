@@ -1,8 +1,10 @@
 #![allow(non_snake_case)]
 
 use crate::app_config::AppType;
+use crate::error::AppError;
 use crate::init_status::{InitErrorPayload, SkillsMigrationPayload};
 use crate::services::ProviderService;
+use cc_command_api::command_api;
 use once_cell::sync::Lazy;
 use regex::Regex;
 use std::collections::HashMap;
@@ -35,20 +37,20 @@ pub async fn open_external(app: AppHandle, url: String) -> Result<bool, String> 
     Ok(true)
 }
 
-#[tauri::command]
-pub async fn copy_text_to_clipboard(text: String) -> Result<bool, String> {
+#[command_api]
+pub async fn copy_text_to_clipboard(text: String) -> Result<bool, AppError> {
     // Use spawn_blocking to avoid blocking the async runtime
     // Clipboard access can block on some platforms and may have thread/loop constraints
-    tokio::task::spawn_blocking(move || {
+    Ok(tokio::task::spawn_blocking(move || {
         let mut clipboard =
             arboard::Clipboard::new().map_err(|e| format!("访问系统剪贴板失败: {e}"))?;
         clipboard
             .set_text(text)
             .map_err(|e| format!("写入系统剪贴板失败: {e}"))?;
-        Ok(true)
+        Ok::<bool, String>(true)
     })
     .await
-    .map_err(|e| format!("剪贴板任务执行失败: {e}"))?
+    .map_err(|e| format!("剪贴板任务执行失败: {e}"))??)
 }
 
 /// 检查更新
@@ -66,8 +68,8 @@ pub async fn check_for_updates(handle: AppHandle) -> Result<bool, String> {
 }
 
 /// 判断是否为便携版（绿色版）运行
-#[tauri::command]
-pub async fn is_portable_mode() -> Result<bool, String> {
+#[command_api(rest = "GET /control/v1/portable-mode")]
+pub async fn is_portable_mode() -> Result<bool, AppError> {
     let exe_path = std::env::current_exe().map_err(|e| format!("获取可执行路径失败: {e}"))?;
     if let Some(dir) = exe_path.parent() {
         Ok(dir.join("portable.ini").is_file())
@@ -78,8 +80,8 @@ pub async fn is_portable_mode() -> Result<bool, String> {
 
 /// 获取应用启动阶段的初始化错误（若有）。
 /// 用于前端在早期主动拉取，避免事件订阅竞态导致的提示缺失。
-#[tauri::command]
-pub async fn get_init_error() -> Result<Option<InitErrorPayload>, String> {
+#[command_api]
+pub async fn get_init_error() -> Result<Option<InitErrorPayload>, AppError> {
     Ok(crate::init_status::get_init_error())
 }
 
@@ -150,11 +152,11 @@ fn tool_env_type_and_wsl_distro(_tool: &str) -> (String, Option<String>) {
     ("unknown".to_string(), None)
 }
 
-#[tauri::command]
+#[command_api]
 pub async fn get_tool_versions(
     tools: Option<Vec<String>>,
     wsl_shell_by_tool: Option<HashMap<String, WslShellPreferenceInput>>,
-) -> Result<Vec<ToolVersion>, String> {
+) -> Result<Vec<ToolVersion>, AppError> {
     let requested: Vec<&str> = if let Some(tools) = tools.as_ref() {
         let set: std::collections::HashSet<&str> = tools.iter().map(|s| s.as_str()).collect();
         VALID_TOOLS
@@ -231,16 +233,16 @@ impl ToolLifecycleCoordinator {
 static TOOL_LIFECYCLE: Lazy<ToolLifecycleCoordinator> =
     Lazy::new(ToolLifecycleCoordinator::default);
 
-#[tauri::command]
+#[command_api]
 pub async fn run_tool_lifecycle_action(
     tools: Vec<String>,
     action: String,
     wsl_shell_by_tool: Option<HashMap<String, WslShellPreferenceInput>>,
-) -> Result<(), String> {
+) -> Result<(), AppError> {
     let action = ToolLifecycleAction::from_str(&action)?;
     let requested = normalize_requested_tools(&tools);
     if requested.is_empty() {
-        return Err("No supported tools selected".to_string());
+        return Err("No supported tools selected".to_string().into());
     }
 
     let label = match action {
@@ -249,13 +251,13 @@ pub async fn run_tool_lifecycle_action(
     };
 
     // 排队结束后再探测安装目标，与执行一起持锁，避免读到另一升级的中间状态。
-    TOOL_LIFECYCLE
+    Ok(TOOL_LIFECYCLE
         .run(requested, move |tools| {
             let command_line =
                 build_tool_lifecycle_command(tools, action, wsl_shell_by_tool.as_ref())?;
             run_tool_lifecycle_silently(&command_line, label)
         })
-        .await
+        .await?)
 }
 
 /// 静默执行工具安装/更新脚本：直接捕获子进程输出并阻塞到命令真正结束，
@@ -4222,15 +4224,15 @@ pub struct ToolInstallationReport {
 /// 探测各工具的安装分布：枚举所有安装、标记冲突、生成锚定升级命令。只读、无副作用。
 /// 诊断按钮、升级前确认、升级后补诊共用此命令，各取所需字段——避免对同一份枚举结果
 /// 散落多套下游判定。
-#[tauri::command]
+#[command_api]
 pub async fn probe_tool_installations(
     tools: Vec<String>,
-) -> Result<Vec<ToolInstallationReport>, String> {
+) -> Result<Vec<ToolInstallationReport>, AppError> {
     let requested = normalize_requested_tools(&tools);
     if requested.is_empty() {
-        return Err("No supported tools selected".to_string());
+        return Err("No supported tools selected".to_string().into());
     }
-    tokio::task::spawn_blocking(move || {
+    let result = tokio::task::spawn_blocking(move || {
         requested
             .into_iter()
             .map(|tool| {
@@ -4255,7 +4257,8 @@ pub async fn probe_tool_installations(
             .collect()
     })
     .await
-    .map_err(|e| format!("probe task join error: {e}"))
+    .map_err(|e| format!("probe task join error: {e}"))?;
+    Ok(result)
 }
 
 #[cfg(target_os = "windows")]

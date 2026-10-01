@@ -1,13 +1,14 @@
 //! xAI OAuth state and xAI-specific commands.
 
+use crate::error::AppError;
 use crate::proxy::providers::xai_oauth_auth::XaiOAuthManager;
 use crate::proxy::providers::XAI_API_BASE_URL;
 use crate::services::model_fetch::FetchedModel;
 use crate::services::subscription::{CredentialStatus, SubscriptionQuota};
+use cc_command_api::command_api;
 use serde::Deserialize;
 use std::sync::Arc;
 use std::time::Duration;
-use tauri::State;
 use tokio::sync::RwLock;
 
 pub struct XaiOAuthState(pub Arc<RwLock<XaiOAuthManager>>);
@@ -66,12 +67,12 @@ pub(crate) async fn query_xai_oauth_quota_for(
 }
 
 /// 查询 xAI OAuth (SuperGrok 反代) 订阅额度
-#[tauri::command(rename_all = "camelCase")]
+#[command_api(state = "state")]
 pub async fn get_xai_oauth_quota(
     account_id: Option<String>,
-    state: State<'_, XaiOAuthState>,
-) -> Result<SubscriptionQuota, String> {
-    query_xai_oauth_quota_for(&state, account_id).await
+    state: &XaiOAuthState,
+) -> Result<SubscriptionQuota, AppError> {
+    Ok(query_xai_oauth_quota_for(state, account_id).await?)
 }
 
 #[derive(Debug, Deserialize)]
@@ -87,11 +88,11 @@ struct ModelEntry {
     owned_by: Option<String>,
 }
 
-#[tauri::command(rename_all = "camelCase")]
+#[command_api(state = "state")]
 pub async fn get_xai_oauth_models(
     account_id: Option<String>,
-    state: State<'_, XaiOAuthState>,
-) -> Result<Vec<FetchedModel>, String> {
+    state: &XaiOAuthState,
+) -> Result<Vec<FetchedModel>, AppError> {
     let manager = state.0.read().await;
     let resolved = match account_id
         .as_deref()
@@ -116,7 +117,7 @@ pub async fn get_xai_oauth_models(
         .map_err(|error| format!("xAI models request failed: {error}"))?;
     let status = response.status();
     if !status.is_success() {
-        return Err(format!("xAI models request failed: HTTP {status}"));
+        return Err(format!("xAI models request failed: HTTP {status}").into());
     }
     let payload: ModelsResponse = response
         .json()

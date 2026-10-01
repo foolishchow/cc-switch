@@ -4,6 +4,7 @@
 
 use crate::proxy::http_client;
 use crate::store::AppState;
+use cc_command_api::command_api;
 use serde::Serialize;
 use std::net::{Ipv4Addr, SocketAddrV4, TcpStream};
 use std::time::{Duration, Instant};
@@ -160,7 +161,7 @@ pub async fn test_proxy_url(url: String) -> Result<ProxyTestResult, String> {
 /// 获取当前出站代理状态
 ///
 /// 返回当前是否启用了出站代理以及代理 URL。
-#[tauri::command]
+#[command_api]
 pub fn get_upstream_proxy_status() -> UpstreamProxyStatus {
     let url = http_client::get_current_proxy_url();
     UpstreamProxyStatus {

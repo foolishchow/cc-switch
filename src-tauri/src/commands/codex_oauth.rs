@@ -5,11 +5,12 @@
 //! 大部分认证命令通过通用 `auth_*` 命令（参见 `commands::auth`）暴露给前端，
 //! 此处定义 State wrapper 以及 Codex OAuth 专属的订阅额度和模型列表查询命令。
 
+use crate::error::AppError;
 use crate::proxy::providers::codex_oauth_auth::CodexOAuthManager;
 use crate::services::model_fetch::FetchedModel;
 use crate::services::subscription::{query_codex_quota, CredentialStatus, SubscriptionQuota};
+use cc_command_api::command_api;
 use std::sync::Arc;
-use tauri::State;
 
 /// Codex OAuth 认证状态
 ///
@@ -24,13 +25,12 @@ pub struct CodexOAuthState(pub Arc<CodexOAuthManager>);
 /// - 没有任何账号时返回 `not_found`，前端 `SubscriptionQuotaView` 会静默不渲染
 /// - 复用 `services::subscription::query_codex_quota`，因此 wham/usage 端点协议
 ///   与 Codex CLI 路径完全一致
-#[tauri::command(rename_all = "camelCase")]
+#[command_api(state = "app_state, state")]
 pub async fn get_codex_oauth_quota(
-    app: tauri::AppHandle,
-    app_state: State<'_, crate::store::AppState>,
+    app_state: &crate::store::AppState,
     account_id: Option<String>,
-    state: State<'_, CodexOAuthState>,
-) -> Result<SubscriptionQuota, String> {
+    state: &CodexOAuthState,
+) -> Result<SubscriptionQuota, AppError> {
     let manager = &state.0;
 
     // 解析最终使用的账号 ID：显式 > 默认账号 > 无账号 (not_found)
@@ -48,9 +48,8 @@ pub async fn get_codex_oauth_quota(
     // authentication/HTTP failures replace it so the tray hides invalid quotas.
     if let Ok(quota) = &result {
         app_state.usage_cache.put_codex_oauth(id, quota.clone());
-        crate::tray::schedule_tray_refresh(&app);
     }
-    result
+    Ok(result?)
 }
 
 async fn query_codex_oauth_quota_for(
@@ -88,11 +87,11 @@ async fn query_codex_oauth_quota_for(
 /// ChatGPT Codex 反代使用 `chatgpt.com/backend-api/codex/*`，不是 OpenAI 兼容
 /// `/v1/models`。这里复用托管 OAuth 账号的 access_token，直接读取 Codex 后端
 /// 暴露的模型列表端点。
-#[tauri::command(rename_all = "camelCase")]
+#[command_api(state = "state")]
 pub async fn get_codex_oauth_models(
     account_id: Option<String>,
-    state: State<'_, CodexOAuthState>,
-) -> Result<Vec<FetchedModel>, String> {
+    state: &CodexOAuthState,
+) -> Result<Vec<FetchedModel>, AppError> {
     let manager = &state.0;
     let resolved = match account_id
         .as_deref()
@@ -103,7 +102,7 @@ pub async fn get_codex_oauth_models(
         None => manager.default_account_id().await,
     };
     let Some(id) = resolved else {
-        return Err("No ChatGPT account available".to_string());
+        return Err("No ChatGPT account available".to_string().into());
     };
 
     let token = manager
@@ -115,5 +114,8 @@ pub async fn get_codex_oauth_models(
         .await
         .map_err(|e| e.to_string())?;
 
-    crate::services::codex_oauth_models::fetch_models_with_token(&token, &chatgpt_account_id).await
+    Ok(
+        crate::services::codex_oauth_models::fetch_models_with_token(&token, &chatgpt_account_id)
+            .await?,
+    )
 }

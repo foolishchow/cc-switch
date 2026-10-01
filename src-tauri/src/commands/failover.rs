@@ -3,8 +3,10 @@
 //! 管理代理模式下的故障转移队列（基于 providers 表的 in_failover_queue 字段）
 
 use crate::database::FailoverQueueItem;
+use crate::error::AppError;
 use crate::provider::Provider;
 use crate::store::AppState;
+use cc_command_api::command_api;
 use std::str::FromStr;
 use tauri::Emitter;
 
@@ -70,23 +72,17 @@ mod tests {
 }
 
 /// 获取故障转移队列
-#[tauri::command]
+#[command_api(rest = "GET /control/v1/failover/queue", query = "app_type as app")]
 pub async fn get_failover_queue(
-    state: tauri::State<'_, AppState>,
+    state: &AppState,
     app_type: String,
-) -> Result<Vec<FailoverQueueItem>, String> {
+) -> Result<Vec<FailoverQueueItem>, AppError> {
     require_failover_app(&app_type)?;
-    let queue = state
-        .db
-        .get_failover_queue(&app_type)
-        .map_err(|e| e.to_string())?;
+    let queue = state.db.get_failover_queue(&app_type)?;
     if app_type != "codex" {
         return Ok(queue);
     }
-    let providers = state
-        .db
-        .get_all_providers(&app_type)
-        .map_err(|e| e.to_string())?;
+    let providers = state.db.get_all_providers(&app_type)?;
     Ok(queue
         .into_iter()
         .filter(|item| {
@@ -98,16 +94,13 @@ pub async fn get_failover_queue(
 }
 
 /// 获取可添加到故障转移队列的供应商（不在队列中的）
-#[tauri::command]
+#[command_api(rest = "GET /control/v1/failover/available", query = "app_type as app")]
 pub async fn get_available_providers_for_failover(
-    state: tauri::State<'_, AppState>,
+    state: &AppState,
     app_type: String,
-) -> Result<Vec<Provider>, String> {
+) -> Result<Vec<Provider>, AppError> {
     require_failover_app(&app_type)?;
-    let providers = state
-        .db
-        .get_available_providers_for_failover(&app_type)
-        .map_err(|e| e.to_string())?;
+    let providers = state.db.get_available_providers_for_failover(&app_type)?;
     Ok(providers
         .into_iter()
         .filter(|provider| {
@@ -117,47 +110,48 @@ pub async fn get_available_providers_for_failover(
 }
 
 /// 添加供应商到故障转移队列
-#[tauri::command]
+#[command_api(
+    rest = "POST /control/v1/failover/queue",
+    body = "app_type,provider_id"
+)]
 pub async fn add_to_failover_queue(
-    state: tauri::State<'_, AppState>,
+    state: &AppState,
     app_type: String,
     provider_id: String,
-) -> Result<(), String> {
+) -> Result<(), AppError> {
     require_failover_app(&app_type)?;
     require_failover_provider(&state.db, &app_type, &provider_id)?;
-    state
-        .db
-        .add_to_failover_queue(&app_type, &provider_id)
-        .map_err(|e| e.to_string())
+    state.db.add_to_failover_queue(&app_type, &provider_id)?;
+    Ok(())
 }
 
 /// 从故障转移队列移除供应商
-#[tauri::command]
+#[command_api(
+    rest = "DELETE /control/v1/failover/queue/{provider_id}",
+    path = "provider_id",
+    query = "app_type as app"
+)]
 pub async fn remove_from_failover_queue(
-    state: tauri::State<'_, AppState>,
+    state: &AppState,
     app_type: String,
     provider_id: String,
-) -> Result<(), String> {
+) -> Result<(), AppError> {
     require_failover_app(&app_type)?;
     state
         .db
-        .remove_from_failover_queue(&app_type, &provider_id)
-        .map_err(|e| e.to_string())
+        .remove_from_failover_queue(&app_type, &provider_id)?;
+    Ok(())
 }
 
 /// 获取指定应用的自动故障转移开关状态（从 proxy_config 表读取）
-#[tauri::command]
+#[command_api(rest = "GET /control/v1/failover/auto", query = "app_type as app")]
 pub async fn get_auto_failover_enabled(
-    state: tauri::State<'_, AppState>,
+    state: &AppState,
     app_type: String,
-) -> Result<bool, String> {
+) -> Result<bool, AppError> {
     require_failover_app(&app_type)?;
-    state
-        .db
-        .get_proxy_config_for_app(&app_type)
-        .await
-        .map(|config| config.auto_failover_enabled)
-        .map_err(|e| e.to_string())
+    let config = state.db.get_proxy_config_for_app(&app_type).await?;
+    Ok(config.auto_failover_enabled)
 }
 
 /// 设置指定应用的自动故障转移开关状态（写入 proxy_config 表）
