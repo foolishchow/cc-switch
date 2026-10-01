@@ -18,6 +18,18 @@ import { ThemeProvider } from "@/components/theme-provider";
 import { UpdateProvider } from "@/contexts/UpdateContext";
 import { Toaster } from "@/components/ui/sonner";
 
+// Polyfill: crypto.randomUUID() 仅安全上下文 (HTTPS/localhost) 可用。
+// Web 控制台走 HTTP 时缺失，用 getRandomValues (非安全上下文也支持) 补齐。
+if (!crypto.randomUUID && crypto.getRandomValues) {
+  crypto.randomUUID = function (): string {
+    const bytes = crypto.getRandomValues(new Uint8Array(16));
+    bytes[6] = (bytes[6] & 0x0f) | 0x40;
+    bytes[8] = (bytes[8] & 0x3f) | 0x80;
+    const h = Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
+    return `${h.slice(0,8)}-${h.slice(8,12)}-${h.slice(12,16)}-${h.slice(16,20)}-${h.slice(20)}`;
+  } as unknown as typeof crypto.randomUUID;
+}
+
 const queryClient = new QueryClient();
 
 function TokenGate({ children }: { children: React.ReactNode }) {
