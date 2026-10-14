@@ -16,7 +16,7 @@ use crate::services::skill::skill_state_write_guard;
 use crate::services::sync_protocol::sync_mutex;
 use crate::store::AppState;
 
-async fn run_with_database_restore_lock<T, Start, Fut>(start_operation: Start) -> T
+pub(crate) async fn run_with_database_restore_lock<T, Start, Fut>(start_operation: Start) -> T
 where
     Start: FnOnce() -> Fut,
     Fut: std::future::Future<Output = T>,
