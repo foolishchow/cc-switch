@@ -2,6 +2,7 @@
 //!
 //! 提供前端调用的 API 接口
 
+use cc_command_api::command_api;
 use crate::error::AppError;
 use crate::proxy::types::*;
 use crate::proxy::{CircuitBreakerConfig, CircuitBreakerStats};
@@ -18,16 +19,17 @@ fn require_proxy_app(app_type: &str) -> Result<crate::app_config::AppType, Strin
 }
 
 /// 启动代理服务器（仅启动服务，不接管 Live 配置）
-#[tauri::command]
+#[command_api(rest = "POST /control/v1/proxy/start")]
 pub async fn start_proxy_server(
-    state: tauri::State<'_, AppState>,
-) -> Result<ProxyServerInfo, String> {
+    state: &AppState,
+) -> Result<ProxyServerInfo, AppError> {
     state.proxy_service.start().await
+        .map_err(AppError::Config)
 }
 
 /// 停止代理服务器（仅停止服务，不恢复/清理 Live 接管状态）
-#[tauri::command]
-pub async fn stop_proxy_server(state: tauri::State<'_, AppState>) -> Result<(), String> {
+#[command_api(rest = "POST /control/v1/proxy/stop")]
+pub async fn stop_proxy_server(state: &AppState) -> Result<(), AppError> {
     let takeover = state.proxy_service.get_takeover_status().await?;
     if takeover.claude
         || takeover.codex
@@ -36,12 +38,12 @@ pub async fn stop_proxy_server(state: tauri::State<'_, AppState>) -> Result<(), 
         || takeover.opencode
         || takeover.openclaw
     {
-        return Err(
+        return Err(AppError::Config(
             "仍有应用处于代理接管状态，请先在设置中关闭对应应用接管后再停止本地路由。".to_string(),
-        );
+        ));
     }
 
-    state.proxy_service.stop().await
+    state.proxy_service.stop().await.map_err(AppError::Config)
 }
 
 /// 关闭本地路由：所有应用退回直连，再停止代理服务器
@@ -200,9 +202,9 @@ pub async fn adopt_codex_stack_catalog(
 }
 
 /// 获取代理服务器状态
-#[tauri::command]
-pub async fn get_proxy_status(state: tauri::State<'_, AppState>) -> Result<ProxyStatus, String> {
-    state.proxy_service.get_status().await
+#[command_api(rest = "GET /control/v1/proxy/status")]
+pub async fn get_proxy_status(state: &AppState) -> Result<ProxyStatus, AppError> {
+    state.proxy_service.get_status().await.map_err(AppError::Config)
 }
 
 /// 获取代理配置

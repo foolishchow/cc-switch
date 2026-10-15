@@ -1,3 +1,4 @@
+use cc_command_api::command_api;
 use indexmap::IndexMap;
 use tauri::{Emitter, Manager, State};
 
@@ -21,19 +22,19 @@ const TEMPLATE_TYPE_OFFICIAL_SUBSCRIPTION: &str = "official_subscription";
 const COPILOT_UNIT_PREMIUM: &str = "requests";
 
 /// 获取所有供应商
-#[tauri::command]
+#[command_api(rest = "GET /control/v1/providers", query = "app")]
 pub fn get_providers(
-    state: State<'_, AppState>,
+    state: &AppState,
     app: String,
-) -> Result<IndexMap<String, Provider>, String> {
-    let app_type = AppType::from_str(&app).map_err(|e| e.to_string())?;
-    ProviderService::list(state.inner(), app_type).map_err(|e| e.to_string())
+) -> Result<IndexMap<String, Provider>, AppError> {
+    let app_type = AppType::from_str(&app)?;
+    ProviderService::list(state, app_type)
 }
 
-#[tauri::command]
-pub fn get_current_provider(state: State<'_, AppState>, app: String) -> Result<String, String> {
-    let app_type = AppType::from_str(&app).map_err(|e| e.to_string())?;
-    ProviderService::current(state.inner(), app_type).map_err(|e| e.to_string())
+#[command_api(rest = "GET /control/v1/providers/current", query = "app")]
+pub fn get_current_provider(state: &AppState, app: String) -> Result<String, AppError> {
+    let app_type = AppType::from_str(&app)?;
+    ProviderService::current(state, app_type)
 }
 
 #[tauri::command]
