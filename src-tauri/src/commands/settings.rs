@@ -1,5 +1,7 @@
 #![allow(non_snake_case)]
 
+use cc_command_api::command_api;
+use crate::error::AppError;
 use tauri::{AppHandle, Emitter};
 use tauri_plugin_updater::UpdaterExt;
 
@@ -55,17 +57,17 @@ pub(crate) fn merge_settings_for_save(
 }
 
 /// 获取设置
-#[tauri::command]
-pub async fn get_settings() -> Result<crate::settings::AppSettings, String> {
+#[command_api(rest = "GET /control/v1/settings")]
+pub async fn get_settings() -> Result<crate::settings::AppSettings, AppError> {
     Ok(crate::settings::get_settings_for_frontend())
 }
 
 /// 保存设置
-#[tauri::command]
+#[command_api(rest = "PUT /control/v1/settings")]
 pub async fn save_settings(
-    state: tauri::State<'_, crate::store::AppState>,
+    state: &crate::store::AppState,
     settings: crate::settings::AppSettings,
-) -> Result<bool, String> {
+) -> Result<bool, AppError> {
     let existing = crate::settings::get_settings();
     let merged = merge_settings_for_save(settings, &existing);
     let unify_codex_changed =
@@ -73,21 +75,21 @@ pub async fn save_settings(
     let unify_codex_enabled = merged.unify_codex_session_history;
     let classic_subagents_changed =
         merged.codex_stack_classic_subagents != existing.codex_stack_classic_subagents;
-    crate::settings::update_settings(merged).map_err(|e| e.to_string())?;
+    crate::settings::update_settings(merged)?;
 
     // 经典子 agent 开关只影响 Stack 模式下的合并目录：立即重写，失败时回滚设置，
     // 免得界面显示已打开、客户端还是旧目录。
     if classic_subagents_changed {
-        if let Err(err) = crate::mode::controller::resync_codex_stack_catalog(state.inner()).await {
+        if let Err(err) = crate::mode::controller::resync_codex_stack_catalog(state).await {
             log::warn!("经典子 agent 开关变更后重写 Codex 模型目录失败，回滚设置: {err}");
             let mut rollback = crate::settings::get_settings();
             rollback.codex_stack_classic_subagents = existing.codex_stack_classic_subagents;
             if let Err(rollback_err) = crate::settings::update_settings(rollback) {
                 log::error!("回滚经典子 agent 开关失败: {rollback_err}");
             }
-            return Err(format!(
+            return Err(AppError::Config(format!(
                 "子 agent 开关未生效（Codex 模型目录重写失败） (The sub-agent setting did not take effect: rewriting the Codex model catalog failed): {err}"
-            ));
+            )));
         }
     }
 
@@ -100,15 +102,15 @@ pub async fn save_settings(
         // 报错让前端 saved=false 短路还原；回滚是整次保存的事务语义
         // （本开关的保存只携带开关相关字段）。
         if let Err(err) =
-            crate::services::provider::reapply_current_codex_official_live(state.inner())
+            crate::services::provider::reapply_current_codex_official_live(state)
         {
             log::warn!("统一 Codex 会话历史开关变更后重写 live 配置失败，回滚设置: {err}");
             if let Err(rollback_err) = crate::settings::update_settings(existing) {
                 log::error!("回滚统一会话开关设置失败: {rollback_err}");
             }
-            return Err(format!(
+            return Err(AppError::Config(format!(
                 "统一 Codex 会话历史开关未生效（live 配置重写失败）: {err}"
-            ));
+            )));
         }
 
         if unify_codex_enabled {
