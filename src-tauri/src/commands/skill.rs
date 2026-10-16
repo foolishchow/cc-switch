@@ -29,9 +29,9 @@ fn parse_app_type(app: &str) -> Result<AppType, String> {
 // ========== 统一管理命令 ==========
 
 /// 获取所有已安装的 Skills
-#[tauri::command]
-pub fn get_installed_skills(app_state: State<'_, AppState>) -> Result<Vec<InstalledSkill>, String> {
-    SkillService::get_all_installed(&app_state.db).map_err(|e| e.to_string())
+#[command_api(rest = "GET /control/v1/skills/installed", state = "app_state")]
+pub fn get_installed_skills(app_state: &AppState) -> Result<Vec<InstalledSkill>, AppError> {
+    SkillService::get_all_installed(&app_state.db).map_err(|e| AppError::Config(e.to_string()))
 }
 
 #[command_api(rest = "GET /control/v1/skills/backups")]
