@@ -3,6 +3,8 @@
 //! 提供获取、设置和测试全局代理的 Tauri 命令。
 
 use crate::proxy::http_client;
+use cc_command_api::command_api;
+use crate::error::AppError;
 use crate::store::AppState;
 use serde::Serialize;
 use std::net::{Ipv4Addr, SocketAddrV4, TcpStream};
@@ -11,9 +13,9 @@ use std::time::{Duration, Instant};
 /// 获取全局代理 URL
 ///
 /// 返回当前配置的代理 URL，null 表示直连。
-#[tauri::command]
-pub fn get_global_proxy_url(state: tauri::State<'_, AppState>) -> Result<Option<String>, String> {
-    let result = state.db.get_global_proxy_url().map_err(|e| e.to_string())?;
+#[command_api(rest = "GET /control/v1/global-proxy/url")]
+pub fn get_global_proxy_url(state: &AppState) -> Result<Option<String>, AppError> {
+    let result = state.db.get_global_proxy_url()?;
     log::debug!(
         "[GlobalProxy] [GP-010] Read from database: {}",
         result
@@ -31,8 +33,8 @@ pub fn get_global_proxy_url(state: tauri::State<'_, AppState>) -> Result<Option<
 ///
 /// 执行顺序：先验证 → 写 DB → 再应用
 /// 这样确保 DB 写失败时不会出现运行态与持久化不一致的问题
-#[tauri::command]
-pub fn set_global_proxy_url(state: tauri::State<'_, AppState>, url: String) -> Result<(), String> {
+#[command_api(rest = "PUT /control/v1/global-proxy/url", body = "url")]
+pub fn set_global_proxy_url(state: &AppState, url: String) -> Result<(), AppError> {
     // 调试：显示接收到的 URL 信息（不包含敏感内容）
     let has_auth = url.contains('@') && (url.starts_with("http://") || url.starts_with("socks"));
     log::debug!(
@@ -53,8 +55,7 @@ pub fn set_global_proxy_url(state: tauri::State<'_, AppState>, url: String) -> R
     // 2. 验证成功后保存到数据库
     state
         .db
-        .set_global_proxy_url(url_opt)
-        .map_err(|e| e.to_string())?;
+        .set_global_proxy_url(url_opt)?;
 
     // 3. DB 写入成功后再应用到运行态
     http_client::apply_proxy(url_opt)?;
