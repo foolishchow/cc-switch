@@ -122,28 +122,26 @@ pub async fn get_provider_editor_view(
     .map_err(|e| format!("读取编辑器内容失败: {e}"))?
 }
 
-#[tauri::command]
+#[command_api(rest = "DELETE /control/v1/providers/:id", path = "id")]
 pub fn delete_provider(
-    state: State<'_, AppState>,
+    state: &AppState,
     app: String,
     id: String,
-) -> Result<bool, String> {
-    let app_type = AppType::from_str(&app).map_err(|e| e.to_string())?;
-    ProviderService::delete(state.inner(), app_type, &id)
+) -> Result<bool, AppError> {
+    let app_type = AppType::from_str(&app)?;
+    ProviderService::delete(state, app_type, &id)
         .map(|_| true)
-        .map_err(|e| e.to_string())
 }
 
-#[tauri::command]
+#[command_api(rest = "POST /control/v1/providers/:id/remove-live", path = "id")]
 pub fn remove_provider_from_live_config(
-    state: tauri::State<'_, AppState>,
+    state: &AppState,
     app: String,
     id: String,
-) -> Result<bool, String> {
-    let app_type = AppType::from_str(&app).map_err(|e| e.to_string())?;
-    ProviderService::remove_from_live_config(state.inner(), app_type, &id)
+) -> Result<bool, AppError> {
+    let app_type = AppType::from_str(&app)?;
+    ProviderService::remove_from_live_config(state, app_type, &id)
         .map(|_| true)
-        .map_err(|e| e.to_string())
 }
 
 fn switch_provider_internal(
@@ -272,19 +270,18 @@ pub fn import_default_config_test_hook(
     import_default_config_internal(state, app_type)
 }
 
-#[tauri::command]
-pub fn import_default_config(state: State<'_, AppState>, app: String) -> Result<bool, String> {
-    let app_type = AppType::from_str(&app).map_err(|e| e.to_string())?;
-    import_default_config_internal(&state, app_type).map_err(Into::into)
+#[command_api(rest = "POST /control/v1/providers/import-default", query = "app")]
+pub fn import_default_config(state: &AppState, app: String) -> Result<bool, AppError> {
+    let app_type = AppType::from_str(&app)?;
+    import_default_config_internal(state, app_type)
 }
 
-#[tauri::command]
+#[command_api(rest = "GET /control/v1/claude-desktop/status")]
 pub async fn get_claude_desktop_status(
-    state: State<'_, AppState>,
-) -> Result<crate::claude_desktop_config::ClaudeDesktopStatus, String> {
+    state: &AppState,
+) -> Result<crate::claude_desktop_config::ClaudeDesktopStatus, AppError> {
     let proxy_running = state.proxy_service.is_running().await;
     crate::claude_desktop_config::get_status(state.db.as_ref(), proxy_running)
-        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -293,18 +290,16 @@ pub fn get_claude_desktop_default_routes(
     crate::claude_desktop_config::default_proxy_routes()
 }
 
-#[tauri::command]
+#[command_api(rest = "POST /control/v1/claude-desktop/import-from-claude")]
 pub fn import_claude_desktop_providers_from_claude(
-    state: State<'_, AppState>,
-) -> Result<usize, String> {
+    state: &AppState,
+) -> Result<usize, AppError> {
     let claude_providers = state
         .db
-        .get_all_providers(AppType::Claude.as_str())
-        .map_err(|e| e.to_string())?;
+        .get_all_providers(AppType::Claude.as_str())?;
     let existing_ids = state
         .db
-        .get_provider_ids(AppType::ClaudeDesktop.as_str())
-        .map_err(|e| e.to_string())?;
+        .get_provider_ids(AppType::ClaudeDesktop.as_str())?;
 
     let mut imported = 0usize;
     for provider in claude_providers.values() {
@@ -329,8 +324,7 @@ pub fn import_claude_desktop_providers_from_claude(
 
         state
             .db
-            .save_provider(AppType::ClaudeDesktop.as_str(), &desktop_provider)
-            .map_err(|e| e.to_string())?;
+            .save_provider(AppType::ClaudeDesktop.as_str(), &desktop_provider)?;
         imported += 1;
     }
 
