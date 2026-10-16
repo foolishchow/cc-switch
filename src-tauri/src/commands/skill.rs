@@ -75,27 +75,27 @@ pub fn uninstall_skill_unified(
     SkillService::uninstall(&app_state.db, &id).map_err(|e| AppError::Config(e.to_string()))
 }
 
-#[tauri::command]
+#[command_api(rest = "POST /control/v1/skills/backups/:backup_id/restore", path = "backup_id", body = "current_app", state = "app_state")]
 pub fn restore_skill_backup(
     backup_id: String,
     current_app: String,
-    app_state: State<'_, AppState>,
-) -> Result<InstalledSkill, String> {
-    let app_type = parse_app_type(&current_app)?;
+    app_state: &AppState,
+) -> Result<InstalledSkill, AppError> {
+    let app_type = parse_app_type(&current_app).map_err(|e| AppError::Config(e.to_string()))?;
     SkillService::restore_from_backup(&app_state.db, &backup_id, &app_type)
-        .map_err(|e| e.to_string())
+        .map_err(|e| AppError::Config(e.to_string()))
 }
 
 /// 切换 Skill 的应用启用状态
-#[tauri::command]
+#[command_api(rest = "POST /control/v1/skills/:id/toggle", path = "id", body = "app,enabled", state = "app_state")]
 pub fn toggle_skill_app(
     id: String,
     app: String,
     enabled: bool,
-    app_state: State<'_, AppState>,
-) -> Result<bool, String> {
-    let app_type = parse_app_type(&app)?;
-    SkillService::toggle_app(&app_state.db, &id, &app_type, enabled).map_err(|e| e.to_string())?;
+    app_state: &AppState,
+) -> Result<bool, AppError> {
+    let app_type = parse_app_type(&app).map_err(|e| AppError::Config(e.to_string()))?;
+    SkillService::toggle_app(&app_state.db, &id, &app_type, enabled).map_err(|e| AppError::Config(e.to_string()))?;
     Ok(true)
 }
 
