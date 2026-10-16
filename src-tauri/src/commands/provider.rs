@@ -284,7 +284,7 @@ pub async fn get_claude_desktop_status(
     crate::claude_desktop_config::get_status(state.db.as_ref(), proxy_running)
 }
 
-#[tauri::command]
+#[command_api(rest = "GET /control/v1/claude-desktop/default-routes")]
 pub fn get_claude_desktop_default_routes(
 ) -> Vec<crate::claude_desktop_config::ClaudeDesktopDefaultRoute> {
     crate::claude_desktop_config::default_proxy_routes()
@@ -341,34 +341,34 @@ pub fn import_claude_desktop_providers_from_claude(
     Ok(imported)
 }
 
-#[tauri::command]
-pub fn ensure_claude_desktop_official_provider(state: State<'_, AppState>) -> Result<bool, String> {
+#[command_api(rest = "POST /control/v1/claude-desktop/ensure-official")]
+pub fn ensure_claude_desktop_official_provider(state: &AppState) -> Result<bool, AppError> {
     state
         .db
         .ensure_official_seed_by_id(
             crate::database::CLAUDE_DESKTOP_OFFICIAL_PROVIDER_ID,
             AppType::ClaudeDesktop,
         )
-        .map_err(|e| e.to_string())
+        .map_err(|e| AppError::Config(e.to_string()))
 }
 
-#[tauri::command]
-pub fn ensure_codex_official_provider(state: State<'_, AppState>) -> Result<bool, String> {
+#[command_api(rest = "POST /control/v1/codex/ensure-official")]
+pub fn ensure_codex_official_provider(state: &AppState) -> Result<bool, AppError> {
     state
         .db
         .ensure_official_seed_by_id(crate::database::CODEX_OFFICIAL_PROVIDER_ID, AppType::Codex)
-        .map_err(|e| e.to_string())
+        .map_err(|e| AppError::Config(e.to_string()))
 }
 
-#[tauri::command]
-pub fn ensure_grokbuild_official_provider(state: State<'_, AppState>) -> Result<bool, String> {
+#[command_api(rest = "POST /control/v1/grokbuild/ensure-official")]
+pub fn ensure_grokbuild_official_provider(state: &AppState) -> Result<bool, AppError> {
     state
         .db
         .ensure_official_seed_by_id(
             crate::database::GROKBUILD_OFFICIAL_PROVIDER_ID,
             AppType::GrokBuild,
         )
-        .map_err(|e| e.to_string())
+        .map_err(|e| AppError::Config(e.to_string()))
 }
 
 fn claude_provider_models_are_claude_safe(provider: &Provider) -> bool {
