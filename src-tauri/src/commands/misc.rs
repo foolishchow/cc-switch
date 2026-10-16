@@ -1,6 +1,8 @@
 #![allow(non_snake_case)]
 
+use cc_command_api::command_api;
 use crate::app_config::AppType;
+use crate::error::AppError;
 use crate::init_status::{InitErrorPayload, SkillsMigrationPayload};
 use crate::services::ProviderService;
 use once_cell::sync::Lazy;
@@ -99,8 +101,8 @@ pub async fn is_portable_mode() -> Result<bool, String> {
 
 /// 获取应用启动阶段的初始化错误（若有）。
 /// 用于前端在早期主动拉取，避免事件订阅竞态导致的提示缺失。
-#[tauri::command]
-pub async fn get_init_error() -> Result<Option<InitErrorPayload>, String> {
+#[command_api(rest = "GET /control/v1/init-error")]
+pub async fn get_init_error() -> Result<Option<InitErrorPayload>, AppError> {
     Ok(crate::init_status::get_init_error())
 }
 
