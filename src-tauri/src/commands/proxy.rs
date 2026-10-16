@@ -195,11 +195,11 @@ pub async fn set_proxy_stack_member(
 
 /// Codex 聚合的模型被别的模型目录挡住时，改用 CC Switch 生成的目录（去掉指向别的文件的
 /// `model_catalog_json`）。返回之后还剩的提示。
-#[tauri::command]
+#[command_api(rest = "POST /control/v1/proxy/codex/adopt-stack")]
 pub async fn adopt_codex_stack_catalog(
-    state: tauri::State<'_, AppState>,
-) -> Result<Option<&'static str>, String> {
-    crate::mode::controller::adopt_codex_stack_catalog(state.inner()).await
+    state: &AppState,
+) -> Result<Option<&'static str>, AppError> {
+    crate::mode::controller::adopt_codex_stack_catalog(state).await.map_err(|e| AppError::Config(e.to_string()))
 }
 
 /// 获取代理服务器状态
@@ -232,14 +232,14 @@ pub async fn update_proxy_config(
 /// 获取全局代理配置
 ///
 /// 返回统一的全局配置字段（代理开关、监听地址、端口、日志开关）
-#[tauri::command]
+#[command_api(rest = "GET /control/v1/proxy/global-config")]
 pub async fn get_global_proxy_config(
-    state: tauri::State<'_, AppState>,
-) -> Result<GlobalProxyConfig, String> {
+    state: &AppState,
+) -> Result<GlobalProxyConfig, AppError> {
     let db = &state.db;
     db.get_global_proxy_config()
         .await
-        .map_err(|e| e.to_string())
+        .map_err(|e| AppError::Config(e.to_string()))
 }
 
 /// 更新全局代理配置
@@ -248,21 +248,21 @@ pub async fn get_global_proxy_config(
 /// 「保存并重启服务」：服务在跑时地址或端口变了就重启、再按新地址重写接上路由的客户端
 /// （含 Claude Desktop 的模型映射卡），日志开关实时生效；只写库的话服务还在旧端口上听、
 /// 客户端也还指着旧端口。
-#[tauri::command]
+#[command_api(rest = "PUT /control/v1/proxy/global-config", body = "config")]
 pub async fn update_global_proxy_config(
-    state: tauri::State<'_, AppState>,
+    state: &AppState,
     config: GlobalProxyConfig,
-) -> Result<(), String> {
-    let restarted = state.proxy_service.update_global_config(&config).await?;
+) -> Result<(), AppError> {
+    let restarted = state.proxy_service.update_global_config(&config).await.map_err(|e| AppError::Config(e.to_string()))?;
     if restarted {
-        resync_proxy_clients(state.inner()).await?;
+        resync_proxy_clients(state).await.map_err(|e| AppError::Config(e.to_string()))?;
     }
     Ok(())
 }
 
 /// 获取客户端地址：写进客户端配置的代理主机，空表示按监听地址推。
-#[tauri::command]
-pub async fn get_proxy_client_host() -> Result<String, String> {
+#[command_api(rest = "GET /control/v1/proxy/client-host")]
+pub async fn get_proxy_client_host() -> Result<String, AppError> {
     Ok(crate::settings::get_proxy_client_host().unwrap_or_default())
 }
 
@@ -270,12 +270,12 @@ pub async fn get_proxy_client_host() -> Result<String, String> {
 /// settings.json 里：这个地址只对这台机器有意义，不能随数据库同步到别的设备。
 /// 每次保存都重写一遍：上次重写失败、改好客户端文件后原样再保存就是重试；
 /// 客户端已经是这个地址时重写不碰文件。
-#[tauri::command]
+#[command_api(rest = "PUT /control/v1/proxy/client-host", body = "host")]
 pub async fn set_proxy_client_host(
-    state: tauri::State<'_, AppState>,
+    state: &AppState,
     host: String,
-) -> Result<(), String> {
-    save_proxy_client_host(state.inner(), &host).await
+) -> Result<(), AppError> {
+    save_proxy_client_host(state, &host).await.map_err(|e| AppError::Config(e.to_string()))
 }
 
 pub(crate) async fn save_proxy_client_host(state: &AppState, host: &str) -> Result<(), String> {
@@ -317,29 +317,29 @@ fn resync_claude_desktop_gateway(db: &crate::database::Database) -> Result<(), S
 /// 获取指定应用的代理配置
 ///
 /// 返回应用级配置（enabled、auto_failover、超时、熔断器等）
-#[tauri::command]
+#[command_api(rest = "GET /control/v1/proxy/:app/config", path = "app_type")]
 pub async fn get_proxy_config_for_app(
-    state: tauri::State<'_, AppState>,
+    state: &AppState,
     app_type: String,
-) -> Result<AppProxyConfig, String> {
-    require_proxy_app(&app_type)?;
+) -> Result<AppProxyConfig, AppError> {
+    require_proxy_app(&app_type).map_err(|e| AppError::Config(e.to_string()))?;
     let db = &state.db;
     db.get_proxy_config_for_app(&app_type)
         .await
-        .map_err(|e| e.to_string())
+        .map_err(|e| AppError::Config(e.to_string()))
 }
 
 /// 更新指定应用的代理配置
 ///
 /// 更新应用级配置（enabled、auto_failover、超时、熔断器等）
-#[tauri::command]
+#[command_api(rest = "PUT /control/v1/proxy/app-config", body = "config")]
 pub async fn update_proxy_config_for_app(
-    state: tauri::State<'_, AppState>,
+    state: &AppState,
     config: AppProxyConfig,
-) -> Result<(), String> {
+) -> Result<(), AppError> {
     let db = &state.db;
     let app_type = config.app_type.clone();
-    let app = require_proxy_app(&app_type)?;
+    let app = require_proxy_app(&app_type).map_err(|e| AppError::Config(e.to_string()))?;
     let circuit_config = CircuitBreakerConfig::from(&config);
     // `enabled` 是模式的镜像，只由进入 / 退出代理改写。
     let mut config = config;
@@ -347,12 +347,13 @@ pub async fn update_proxy_config_for_app(
 
     db.update_proxy_config_for_app(config)
         .await
-        .map_err(|e| e.to_string())?;
+        .map_err(|e| AppError::Config(e.to_string()))?;
 
     state
         .proxy_service
         .update_circuit_breaker_config_for_app(&app_type, circuit_config)
         .await
+        .map_err(|e| AppError::Config(e.to_string()))
 }
 
 async fn get_pricing_model_source_internal(
@@ -372,14 +373,14 @@ pub async fn get_pricing_model_source_test_hook(
 }
 
 /// 获取计费模式来源
-#[tauri::command]
+#[command_api(rest = "GET /control/v1/proxy/:app/pricing-source", path = "app_type")]
 pub async fn get_pricing_model_source(
-    state: tauri::State<'_, AppState>,
+    state: &AppState,
     app_type: String,
-) -> Result<String, String> {
-    get_pricing_model_source_internal(&state, &app_type)
+) -> Result<String, AppError> {
+    get_pricing_model_source_internal(state, &app_type)
         .await
-        .map_err(|e| e.to_string())
+        .map_err(|e| AppError::Config(e.to_string()))
 }
 
 async fn set_pricing_model_source_internal(
