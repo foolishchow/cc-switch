@@ -904,16 +904,16 @@ pub fn remove_custom_endpoint(
         .map_err(|e| AppError::Config(e.to_string()))
 }
 
-#[tauri::command]
+#[command_api(rest = "POST /control/v1/providers/:app/:providerId/endpoint/:url/last-used", path = "app,providerId,url")]
 pub fn update_endpoint_last_used(
-    state: State<'_, AppState>,
+    state: &AppState,
     app: String,
     #[allow(non_snake_case)] providerId: String,
     url: String,
-) -> Result<(), String> {
-    let app_type = AppType::from_str(&app).map_err(|e| e.to_string())?;
-    ProviderService::update_endpoint_last_used(state.inner(), app_type, &providerId, url)
-        .map_err(|e| e.to_string())
+) -> Result<(), AppError> {
+    let app_type = AppType::from_str(&app).map_err(|e| AppError::Config(e.to_string()))?;
+    ProviderService::update_endpoint_last_used(state, app_type, &providerId, url)
+        .map_err(|e| AppError::Config(e.to_string()))
 }
 
 /// 排序就是故障转移队列的优先级，托盘按它列队列：改完重建托盘。
@@ -951,19 +951,19 @@ fn emit_universal_provider_synced(app: &AppHandle, action: &str, id: &str) {
     );
 }
 
-#[tauri::command]
+#[command_api(rest = "GET /control/v1/universal-providers")]
 pub fn get_universal_providers(
-    state: State<'_, AppState>,
-) -> Result<HashMap<String, UniversalProvider>, String> {
-    ProviderService::list_universal(state.inner()).map_err(|e| e.to_string())
+    state: &AppState,
+) -> Result<HashMap<String, UniversalProvider>, AppError> {
+    ProviderService::list_universal(state).map_err(|e| AppError::Config(e.to_string()))
 }
 
-#[tauri::command]
+#[command_api(rest = "GET /control/v1/universal-providers/:id", path = "id")]
 pub fn get_universal_provider(
-    state: State<'_, AppState>,
+    state: &AppState,
     id: String,
-) -> Result<Option<UniversalProvider>, String> {
-    ProviderService::get_universal(state.inner(), &id).map_err(|e| e.to_string())
+) -> Result<Option<UniversalProvider>, AppError> {
+    ProviderService::get_universal(state, &id).map_err(|e| AppError::Config(e.to_string()))
 }
 
 #[tauri::command]
@@ -1009,17 +1009,17 @@ pub fn sync_universal_provider(
     Ok(result)
 }
 
-#[tauri::command]
-pub fn import_opencode_providers_from_live(state: State<'_, AppState>) -> Result<usize, String> {
-    crate::services::provider::import_opencode_providers_from_live(state.inner())
-        .map_err(|e| e.to_string())
+#[command_api(rest = "POST /control/v1/opencode/import-from-live")]
+pub fn import_opencode_providers_from_live(state: &AppState) -> Result<usize, AppError> {
+    crate::services::provider::import_opencode_providers_from_live(state)
+        .map_err(|e| AppError::Config(e.to_string()))
 }
 
-#[tauri::command]
-pub fn get_opencode_live_provider_ids() -> Result<Vec<String>, String> {
+#[command_api(rest = "GET /control/v1/opencode/live-provider-ids")]
+pub fn get_opencode_live_provider_ids() -> Result<Vec<String>, AppError> {
     crate::opencode_config::get_providers()
         .map(|providers| providers.keys().cloned().collect())
-        .map_err(|e| e.to_string())
+        .map_err(|e| AppError::Config(e.to_string()))
 }
 
 // ============================================================================
