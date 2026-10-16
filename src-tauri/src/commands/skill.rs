@@ -246,32 +246,32 @@ pub async fn get_skills_for_app(
 }
 
 /// 安装技能（兼容旧 API）
-#[tauri::command]
+#[command_api(rest = "POST /control/v1/skills/legacy/install", body = "directory", state = "service,app_state")]
 pub async fn install_skill(
     directory: String,
-    service: State<'_, SkillServiceState>,
-    app_state: State<'_, AppState>,
-) -> Result<bool, String> {
-    install_skill_for_app("claude".to_string(), directory, service, app_state).await
+    service: &SkillServiceState,
+    app_state: &AppState,
+) -> Result<bool, AppError> {
+    install_skill_for_app_impl("claude".to_string(), directory, service, app_state).await
 }
 
 /// 安装指定应用的技能（兼容旧 API）
-#[tauri::command]
+#[command_api(rest = "POST /control/v1/skills/legacy/app/:app/install", path = "app", body = "directory", state = "service,app_state")]
 pub async fn install_skill_for_app(
     app: String,
     directory: String,
-    service: State<'_, SkillServiceState>,
-    app_state: State<'_, AppState>,
-) -> Result<bool, String> {
-    let app_type = parse_app_type(&app)?;
+    service: &SkillServiceState,
+    app_state: &AppState,
+) -> Result<bool, AppError> {
+    let app_type = parse_app_type(&app).map_err(|e| AppError::Config(e.to_string()))?;
 
     // 先获取技能信息
-    let repos = app_state.db.get_skill_repos().map_err(|e| e.to_string())?;
+    let repos = app_state.db.get_skill_repos().map_err(|e| AppError::Config(e.to_string()))?;
     let skills = service
         .0
         .discover_available(repos)
         .await
-        .map_err(|e| e.to_string())?;
+        .map_err(|e| AppError::Config(e.to_string()))?;
 
     let skill = skills
         .into_iter()
@@ -289,44 +289,45 @@ pub async fn install_skill_for_app(
                 &[("directory", &directory)],
                 Some("checkRepoUrl"),
             )
-        })?;
+        })
+        .map_err(|e| AppError::Config(e.to_string()))?;
 
     service
         .0
         .install(&app_state.db, &skill, &app_type)
         .await
-        .map_err(|e| e.to_string())?;
+        .map_err(|e| AppError::Config(e.to_string()))?;
 
     Ok(true)
 }
 
 /// 卸载技能（兼容旧 API）
-#[tauri::command]
+#[command_api(rest = "POST /control/v1/skills/legacy/uninstall", body = "directory", state = "app_state")]
 pub fn uninstall_skill(
     directory: String,
-    app_state: State<'_, AppState>,
-) -> Result<SkillUninstallResult, String> {
-    uninstall_skill_for_app("claude".to_string(), directory, app_state)
+    app_state: &AppState,
+) -> Result<SkillUninstallResult, AppError> {
+    uninstall_skill_for_app_impl("claude".to_string(), directory, app_state)
 }
 
 /// 卸载指定应用的技能（兼容旧 API）
-#[tauri::command]
+#[command_api(rest = "POST /control/v1/skills/legacy/app/:app/uninstall", path = "app", body = "directory", state = "app_state")]
 pub fn uninstall_skill_for_app(
     app: String,
     directory: String,
-    app_state: State<'_, AppState>,
-) -> Result<SkillUninstallResult, String> {
-    let _ = parse_app_type(&app)?; // 验证参数
+    app_state: &AppState,
+) -> Result<SkillUninstallResult, AppError> {
+    let _ = parse_app_type(&app).map_err(|e| AppError::Config(e.to_string()))?; // 验证参数
 
     // 通过 directory 找到对应的 skill id
-    let skills = SkillService::get_all_installed(&app_state.db).map_err(|e| e.to_string())?;
+    let skills = SkillService::get_all_installed(&app_state.db).map_err(|e| AppError::Config(e.to_string()))?;
 
     let skill = skills
         .into_iter()
         .find(|s| s.directory.eq_ignore_ascii_case(&directory))
-        .ok_or_else(|| format!("未找到已安装的 Skill: {directory}"))?;
+        .ok_or_else(|| AppError::Config(format!("未找到已安装的 Skill: {directory}")))?;
 
-    SkillService::uninstall(&app_state.db, &skill.id).map_err(|e| e.to_string())
+    SkillService::uninstall(&app_state.db, &skill.id).map_err(|e| AppError::Config(e.to_string()))
 }
 
 // ========== 仓库管理命令 ==========
