@@ -175,11 +175,11 @@ fn tool_env_type_and_wsl_distro(_tool: &str) -> (String, Option<String>) {
     ("unknown".to_string(), None)
 }
 
-#[tauri::command]
+#[command_api(rest = "GET /control/v1/tool-versions", query = "tools,wsl_shell_by_tool")]
 pub async fn get_tool_versions(
     tools: Option<Vec<String>>,
     wsl_shell_by_tool: Option<HashMap<String, WslShellPreferenceInput>>,
-) -> Result<Vec<ToolVersion>, String> {
+) -> Result<Vec<ToolVersion>, AppError> {
     let requested: Vec<&str> = if let Some(tools) = tools.as_ref() {
         let set: std::collections::HashSet<&str> = tools.iter().map(|s| s.as_str()).collect();
         VALID_TOOLS
