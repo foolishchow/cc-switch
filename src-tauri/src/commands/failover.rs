@@ -98,16 +98,15 @@ pub async fn get_failover_queue(
 }
 
 /// 获取可添加到故障转移队列的供应商（不在队列中的）
-#[tauri::command]
+#[command_api(rest = "GET /control/v1/failover/available-providers", query = "app_type")]
 pub async fn get_available_providers_for_failover(
-    state: tauri::State<'_, AppState>,
+    state: &AppState,
     app_type: String,
-) -> Result<Vec<Provider>, String> {
+) -> Result<Vec<Provider>, AppError> {
     require_failover_app(&app_type)?;
     let providers = state
         .db
-        .get_available_providers_for_failover(&app_type)
-        .map_err(|e| e.to_string())?;
+        .get_available_providers_for_failover(&app_type)?;
     Ok(providers
         .into_iter()
         .filter(|provider| {
