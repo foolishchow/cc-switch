@@ -67,12 +67,12 @@ pub async fn install_skill_unified(
 }
 
 /// 卸载 Skill（新版统一卸载）
-#[tauri::command]
+#[command_api(rest = "POST /control/v1/skills/:id/uninstall", path = "id", state = "app_state")]
 pub fn uninstall_skill_unified(
     id: String,
-    app_state: State<'_, AppState>,
-) -> Result<SkillUninstallResult, String> {
-    SkillService::uninstall(&app_state.db, &id).map_err(|e| e.to_string())
+    app_state: &AppState,
+) -> Result<SkillUninstallResult, AppError> {
+    SkillService::uninstall(&app_state.db, &id).map_err(|e| AppError::Config(e.to_string()))
 }
 
 #[tauri::command]
@@ -100,11 +100,11 @@ pub fn toggle_skill_app(
 }
 
 /// 扫描未管理的 Skills
-#[tauri::command]
+#[command_api(rest = "GET /control/v1/skills/unmanaged", state = "app_state")]
 pub fn scan_unmanaged_skills(
-    app_state: State<'_, AppState>,
-) -> Result<Vec<UnmanagedSkill>, String> {
-    SkillService::scan_unmanaged(&app_state.db).map_err(|e| e.to_string())
+    app_state: &AppState,
+) -> Result<Vec<UnmanagedSkill>, AppError> {
+    SkillService::scan_unmanaged(&app_state.db).map_err(|e| AppError::Config(e.to_string()))
 }
 
 /// 从应用目录导入 Skills
