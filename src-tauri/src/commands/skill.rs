@@ -108,12 +108,12 @@ pub fn scan_unmanaged_skills(
 }
 
 /// 从应用目录导入 Skills
-#[tauri::command]
+#[command_api(rest = "POST /control/v1/skills/import", body = "imports", state = "app_state")]
 pub fn import_skills_from_apps(
     imports: Vec<ImportSkillSelection>,
-    app_state: State<'_, AppState>,
-) -> Result<Vec<InstalledSkill>, String> {
-    SkillService::import_from_apps(&app_state.db, imports).map_err(|e| e.to_string())
+    app_state: &AppState,
+) -> Result<Vec<InstalledSkill>, AppError> {
+    SkillService::import_from_apps(&app_state.db, imports).map_err(|e| AppError::Config(e.to_string()))
 }
 
 // ========== 发现功能命令 ==========
@@ -147,14 +147,14 @@ pub async fn check_skill_updates(
 
 /// 立即重新同步：按数据库里的开关和当前同步方式，把 Skill 重新投影到各应用目录，
 /// 逐应用返回结果。只动 Skills 目录，不碰各应用的配置文件。
-#[tauri::command]
+#[command_api(rest = "POST /control/v1/skills/resync", state = "app_state")]
 pub async fn resync_skills_to_apps(
-    app_state: State<'_, AppState>,
-) -> Result<Vec<SkillAppSyncOutcome>, String> {
+    app_state: &AppState,
+) -> Result<Vec<SkillAppSyncOutcome>, AppError> {
     let db = app_state.db.clone();
     tauri::async_runtime::spawn_blocking(move || SkillService::resync_all_apps(&db))
         .await
-        .map_err(|e| format!("重新同步 Skill 失败: {e}"))
+        .map_err(|e| AppError::Config(format!("重新同步 Skill 失败: {e}")))
 }
 
 /// 更新单个 Skill
