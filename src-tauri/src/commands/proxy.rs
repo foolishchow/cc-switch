@@ -63,36 +63,36 @@ pub async fn get_proxy_takeover_status(
 /// 为指定应用进入 / 退出代理模式。`stack` 为真时进入的是 Stack 模式（和路由模式二选一），
 /// `route` 是确认框里选的路由目标（Stack 模式下是默认那家，不传沿用上次的路由）；退出时
 /// 两者都不看。
-#[tauri::command]
+#[command_api(rest = "POST /control/v1/proxy/:app/takeover", path = "app_type", body = "enabled,stack,route")]
 pub async fn set_proxy_takeover_for_app(
-    state: tauri::State<'_, AppState>,
+    state: &AppState,
     app_type: String,
     enabled: bool,
     stack: Option<bool>,
     route: Option<String>,
-) -> Result<(), String> {
-    let app = require_proxy_app(&app_type)?;
+) -> Result<(), AppError> {
+    let app = require_proxy_app(&app_type).map_err(|e| AppError::Config(e.to_string()))?;
     if enabled {
         crate::mode::controller::enter_with_route(
-            state.inner(),
+            state,
             &app,
             stack.unwrap_or(false),
             route.as_deref(),
         )
-        .await
+        .await.map_err(|e| AppError::Config(e.to_string()))
     } else {
-        crate::mode::controller::exit(state.inner(), &app).await
+        crate::mode::controller::exit(state, &app).await.map_err(|e| AppError::Config(e.to_string()))
     }
 }
 
 /// 应用页模式行用：生效的模式、路由目标（直连时是上次路由的那家）、直连那家。
-#[tauri::command]
+#[command_api(rest = "GET /control/v1/proxy/:app/mode", path = "app_type")]
 pub fn get_app_mode(
-    state: tauri::State<'_, AppState>,
+    state: &AppState,
     app_type: String,
-) -> Result<crate::mode::controller::AppModeView, String> {
-    let app = require_proxy_app(&app_type)?;
-    crate::mode::controller::app_mode_view(state.inner(), &app)
+) -> Result<crate::mode::controller::AppModeView, AppError> {
+    let app = require_proxy_app(&app_type).map_err(|e| AppError::Config(e.to_string()))?;
+    crate::mode::controller::app_mode_view(state, &app).map_err(|e| AppError::Config(e.to_string()))
 }
 
 /// 指定路由目标（聚合模式下是默认那家）。直连模式下只记下来，下次进入路由 / 聚合模式时用它；
@@ -112,64 +112,65 @@ pub async fn set_proxy_route(
 }
 
 /// 启动时没能接上代理、已退回直连的应用（取一次就清空）。
-#[tauri::command]
+#[command_api(rest = "GET /control/v1/proxy/startup-failures")]
 pub fn take_startup_attach_failures() -> Vec<crate::mode::controller::StartupAttachFailure> {
     crate::mode::controller::take_startup_attach_failures()
 }
 
 /// 设置里在路由和 Stack 之间换的时候：处于另一种模式（`stack` 为真是 Stack 模式）的
 /// Claude Code、Codex 先退回直连。返回退回直连的应用。
-#[tauri::command]
+#[command_api(rest = "POST /control/v1/proxy/exit-mode", body = "stack")]
 pub async fn exit_proxy_apps_in_mode(
-    state: tauri::State<'_, AppState>,
+    state: &AppState,
     stack: bool,
-) -> Result<Vec<String>, String> {
-    crate::mode::controller::exit_apps_in_mode(state.inner(), stack).await
+) -> Result<Vec<String>, AppError> {
+    crate::mode::controller::exit_apps_in_mode(state, stack).await.map_err(|e| AppError::Config(e.to_string()))
 }
 
 /// 直连指针：代理模式下退出代理时写回的供应商
-#[tauri::command]
+#[command_api(rest = "GET /control/v1/proxy/:app/direct-provider", path = "app_type")]
 pub fn get_direct_provider(
-    state: tauri::State<'_, AppState>,
+    state: &AppState,
     app_type: String,
-) -> Result<Option<String>, String> {
-    let app = require_proxy_app(&app_type)?;
-    crate::mode::controller::direct_provider_id(state.inner(), &app).map_err(|e| e.to_string())
+) -> Result<Option<String>, AppError> {
+    let app = require_proxy_app(&app_type).map_err(|e| AppError::Config(e.to_string()))?;
+    crate::mode::controller::direct_provider_id(state, &app).map_err(|e| AppError::Config(e.to_string()))
 }
 
 /// Stack 模型：名单里的每一家和它发布的模型 id，以及还在用旧模型列表的 Codex 客户端
-#[tauri::command]
+#[command_api(rest = "GET /control/v1/proxy/:app/stack", path = "app_type")]
 pub async fn get_proxy_stack(
-    state: tauri::State<'_, AppState>,
+    state: &AppState,
     app_type: String,
-) -> Result<crate::mode::stack::StackView, String> {
-    let app = require_proxy_app(&app_type)?;
-    crate::mode::controller::stack_view_with_clients(state.inner(), &app).await
+) -> Result<crate::mode::stack::StackView, AppError> {
+    let app = require_proxy_app(&app_type).map_err(|e| AppError::Config(e.to_string()))?;
+    crate::mode::controller::stack_view_with_clients(state, &app).await.map_err(|e| AppError::Config(e.to_string()))
 }
 
 /// 重启 Codex 的托管守护进程（`codex` TUI 连的那个），让它重读模型目录。会中断守护进程里
 /// 正在运行的任务，只在用户确认之后调。
-#[tauri::command]
+#[command_api(rest = "POST /control/v1/proxy/codex/restart-daemon")]
 pub async fn restart_codex_app_server_daemon(
-) -> Result<crate::services::provider::codex_client_catalog::RestartOutcome, String> {
+) -> Result<crate::services::provider::codex_client_catalog::RestartOutcome, AppError> {
     crate::services::provider::codex_direct::off_runtime(
         crate::services::provider::codex_client_catalog::restart_daemon,
     )
     .await
-    .map_err(|error| error.to_string())?
+    .map_err(|error| AppError::Config(error.to_string()))?
+    .map_err(|error| AppError::Config(error.to_string()))
 }
 
 /// 用户关掉「Codex 可能还在用旧的」提示（看不到进程时出的那种）：记下现在的模型目录和文件
 /// 登录，同一份不再提示。
-#[tauri::command]
-pub async fn acknowledge_codex_stale_clients() -> Result<(), String> {
+#[command_api(rest = "POST /control/v1/proxy/codex/acknowledge-stale")]
+pub async fn acknowledge_codex_stale_clients() -> Result<(), AppError> {
     crate::services::provider::codex_direct::off_runtime(|| {
         crate::services::provider::codex_client_catalog::acknowledge(
             &crate::live::engine::DeviceStore::for_device(),
         )
     })
     .await
-    .map_err(|error| error.to_string())
+    .map_err(|error| AppError::Config(error.to_string()))
 }
 
 /// Stack 模型：把一家加入或移出名单（`enabled` 是目标值）。成功时返回客户端看不到或看不全
