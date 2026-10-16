@@ -2,6 +2,8 @@
 //!
 //! 管理代理模式下的故障转移队列（基于 providers 表的 in_failover_queue 字段）
 
+use cc_command_api::command_api;
+use crate::error::AppError;
 use crate::database::FailoverQueueItem;
 use crate::provider::Provider;
 use crate::store::AppState;
@@ -70,23 +72,21 @@ mod tests {
 }
 
 /// 获取故障转移队列
-#[tauri::command]
+#[command_api(rest = "GET /control/v1/failover/queue", query = "app_type")]
 pub async fn get_failover_queue(
-    state: tauri::State<'_, AppState>,
+    state: &AppState,
     app_type: String,
-) -> Result<Vec<FailoverQueueItem>, String> {
+) -> Result<Vec<FailoverQueueItem>, AppError> {
     require_failover_app(&app_type)?;
     let queue = state
         .db
-        .get_failover_queue(&app_type)
-        .map_err(|e| e.to_string())?;
+        .get_failover_queue(&app_type)?;
     if app_type != "codex" {
         return Ok(queue);
     }
     let providers = state
         .db
-        .get_all_providers(&app_type)
-        .map_err(|e| e.to_string())?;
+        .get_all_providers(&app_type)?;
     Ok(queue
         .into_iter()
         .filter(|item| {
