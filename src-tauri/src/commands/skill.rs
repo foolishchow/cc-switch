@@ -206,15 +206,15 @@ pub async fn open_cc_switch_skills_dir(handle: AppHandle) -> Result<bool, String
 }
 
 /// 搜索 skills.sh 公共目录
-#[tauri::command]
+#[command_api(rest = "GET /control/v1/skills/search", query = "query,limit,offset")]
 pub async fn search_skills_sh(
     query: String,
     limit: usize,
     offset: usize,
-) -> Result<SkillsShSearchResult, String> {
+) -> Result<SkillsShSearchResult, AppError> {
     SkillService::search_skills_sh(&query, limit, offset)
         .await
-        .map_err(|e| e.to_string())
+        .map_err(|e| AppError::Config(e.to_string()))
 }
 
 // ========== 兼容旧 API 的命令 ==========
@@ -332,9 +332,9 @@ pub fn uninstall_skill_for_app(
 // ========== 仓库管理命令 ==========
 
 /// 获取技能仓库列表
-#[tauri::command]
-pub fn get_skill_repos(app_state: State<'_, AppState>) -> Result<Vec<SkillRepo>, String> {
-    app_state.db.get_skill_repos().map_err(|e| e.to_string())
+#[command_api(rest = "GET /control/v1/skills/repos", state = "app_state")]
+pub fn get_skill_repos(app_state: &AppState) -> Result<Vec<SkillRepo>, AppError> {
+    app_state.db.get_skill_repos().map_err(|e| AppError::Config(e.to_string()))
 }
 
 /// 添加技能仓库
