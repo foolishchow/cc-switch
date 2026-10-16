@@ -108,15 +108,15 @@ pub async fn get_init_error() -> Result<Option<InitErrorPayload>, AppError> {
 
 /// 获取 JSON→SQLite 迁移结果（若有）。
 /// 只返回一次 true，之后返回 false，用于前端显示一次性 Toast 通知。
-#[tauri::command]
-pub async fn get_migration_result() -> Result<bool, String> {
+#[command_api(rest = "GET /control/v1/migration-result")]
+pub async fn get_migration_result() -> Result<bool, AppError> {
     Ok(crate::init_status::take_migration_success())
 }
 
 /// 获取 Skills 自动导入（SSOT）迁移结果（若有）。
 /// 只返回一次 Some({count})，之后返回 None，用于前端显示一次性 Toast 通知。
-#[tauri::command]
-pub async fn get_skills_migration_result() -> Result<Option<SkillsMigrationPayload>, String> {
+#[command_api(rest = "GET /control/v1/skills-migration-result")]
+pub async fn get_skills_migration_result() -> Result<Option<SkillsMigrationPayload>, AppError> {
     Ok(crate::init_status::take_skills_migration_result())
 }
 
