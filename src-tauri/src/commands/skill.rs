@@ -220,29 +220,29 @@ pub async fn search_skills_sh(
 // ========== 兼容旧 API 的命令 ==========
 
 /// 获取技能列表（兼容旧 API）
-#[tauri::command]
+#[command_api(rest = "GET /control/v1/skills", state = "service,app_state")]
 pub async fn get_skills(
-    service: State<'_, SkillServiceState>,
-    app_state: State<'_, AppState>,
-) -> Result<Vec<Skill>, String> {
-    let repos = app_state.db.get_skill_repos().map_err(|e| e.to_string())?;
+    service: &SkillServiceState,
+    app_state: &AppState,
+) -> Result<Vec<Skill>, AppError> {
+    let repos = app_state.db.get_skill_repos().map_err(|e| AppError::Config(e.to_string()))?;
     service
         .0
         .list_skills(repos, &app_state.db)
         .await
-        .map_err(|e| e.to_string())
+        .map_err(|e| AppError::Config(e.to_string()))
 }
 
 /// 获取指定应用的技能列表（兼容旧 API）
-#[tauri::command]
+#[command_api(rest = "GET /control/v1/skills/app/:app", path = "app", state = "service,app_state")]
 pub async fn get_skills_for_app(
     app: String,
-    service: State<'_, SkillServiceState>,
-    app_state: State<'_, AppState>,
-) -> Result<Vec<Skill>, String> {
+    service: &SkillServiceState,
+    app_state: &AppState,
+) -> Result<Vec<Skill>, AppError> {
     // 新版本不再区分应用，统一返回所有技能
-    let _ = parse_app_type(&app)?; // 验证 app 参数有效
-    get_skills(service, app_state).await
+    let _ = parse_app_type(&app).map_err(|e| AppError::Config(e.to_string()))?; // 验证 app 参数有效
+    get_skills_impl(service, app_state).await
 }
 
 /// 安装技能（兼容旧 API）
