@@ -402,54 +402,54 @@ pub async fn set_pricing_model_source_test_hook(
 }
 
 /// 设置计费模式来源
-#[tauri::command]
+#[command_api(rest = "PUT /control/v1/proxy/:app/pricing-source", path = "app_type", body = "value")]
 pub async fn set_pricing_model_source(
-    state: tauri::State<'_, AppState>,
+    state: &AppState,
     app_type: String,
     value: String,
-) -> Result<(), String> {
-    set_pricing_model_source_internal(&state, &app_type, &value)
+) -> Result<(), AppError> {
+    set_pricing_model_source_internal(state, &app_type, &value)
         .await
-        .map_err(|e| e.to_string())
+        .map_err(|e| AppError::Config(e.to_string()))
 }
 
 /// 检查代理服务器是否正在运行
-#[tauri::command]
-pub async fn is_proxy_running(state: tauri::State<'_, AppState>) -> Result<bool, String> {
+#[command_api(rest = "GET /control/v1/proxy/is-running")]
+pub async fn is_proxy_running(state: &AppState) -> Result<bool, AppError> {
     Ok(state.proxy_service.is_running().await)
 }
 
 /// 检查是否处于 Live 接管模式
-#[tauri::command]
-pub async fn is_live_takeover_active(state: tauri::State<'_, AppState>) -> Result<bool, String> {
-    state.proxy_service.is_takeover_active().await
+#[command_api(rest = "GET /control/v1/proxy/is-takeover-active")]
+pub async fn is_live_takeover_active(state: &AppState) -> Result<bool, AppError> {
+    state.proxy_service.is_takeover_active().await.map_err(|e| AppError::Config(e.to_string()))
 }
 
 /// 代理模式下切换供应商（热切换）
-#[tauri::command]
+#[command_api(rest = "POST /control/v1/proxy/:app/switch-provider", path = "app_type", body = "provider_id")]
 pub async fn switch_proxy_provider(
-    state: tauri::State<'_, AppState>,
+    state: &AppState,
     app_type: String,
     provider_id: String,
-) -> Result<(), String> {
-    let app = require_proxy_app(&app_type)?;
-    crate::mode::controller::switch_route(state.inner(), &app, &provider_id).await
+) -> Result<(), AppError> {
+    let app = require_proxy_app(&app_type).map_err(|e| AppError::Config(e.to_string()))?;
+    crate::mode::controller::switch_route(state, &app, &provider_id).await.map_err(|e| AppError::Config(e.to_string()))
 }
 
 // ==================== 故障转移相关命令 ====================
 
 /// 获取供应商健康状态
-#[tauri::command]
+#[command_api(rest = "GET /control/v1/proxy/:app/provider/:provider_id/health", path = "app_type,provider_id")]
 pub async fn get_provider_health(
-    state: tauri::State<'_, AppState>,
+    state: &AppState,
     provider_id: String,
     app_type: String,
-) -> Result<ProviderHealth, String> {
-    require_proxy_app(&app_type)?;
+) -> Result<ProviderHealth, AppError> {
+    require_proxy_app(&app_type).map_err(|e| AppError::Config(e.to_string()))?;
     let db = &state.db;
     db.get_provider_health(&provider_id, &app_type)
         .await
-        .map_err(|e| e.to_string())
+        .map_err(|e| AppError::Config(e.to_string()))
 }
 
 /// 重置熔断器
@@ -543,46 +543,47 @@ pub async fn reset_circuit_breaker(
 }
 
 /// 获取熔断器配置
-#[tauri::command]
+#[command_api(rest = "GET /control/v1/proxy/circuit-breaker/config")]
 pub async fn get_circuit_breaker_config(
-    state: tauri::State<'_, AppState>,
-) -> Result<CircuitBreakerConfig, String> {
+    state: &AppState,
+) -> Result<CircuitBreakerConfig, AppError> {
     let db = &state.db;
     db.get_circuit_breaker_config()
         .await
-        .map_err(|e| e.to_string())
+        .map_err(|e| AppError::Config(e.to_string()))
 }
 
 /// 更新熔断器配置
-#[tauri::command]
+#[command_api(rest = "PUT /control/v1/proxy/circuit-breaker/config", body = "config")]
 pub async fn update_circuit_breaker_config(
-    state: tauri::State<'_, AppState>,
+    state: &AppState,
     config: CircuitBreakerConfig,
-) -> Result<(), String> {
+) -> Result<(), AppError> {
     let db = &state.db;
 
     // 1. 更新数据库配置
     db.update_circuit_breaker_config(&config)
         .await
-        .map_err(|e| e.to_string())?;
+        .map_err(|e| AppError::Config(e.to_string()))?;
 
     // 2. 如果代理正在运行，热更新内存中的熔断器配置
     state
         .proxy_service
         .update_circuit_breaker_configs(config)
-        .await?;
+        .await
+        .map_err(|e| AppError::Config(e.to_string()))?;
 
     Ok(())
 }
 
 /// 获取熔断器统计信息（仅当代理服务器运行时）
-#[tauri::command]
+#[command_api(rest = "GET /control/v1/proxy/:app/provider/:provider_id/circuit-breaker-stats", path = "app_type,provider_id")]
 pub async fn get_circuit_breaker_stats(
-    state: tauri::State<'_, AppState>,
+    state: &AppState,
     provider_id: String,
     app_type: String,
-) -> Result<Option<CircuitBreakerStats>, String> {
-    require_proxy_app(&app_type)?;
+) -> Result<Option<CircuitBreakerStats>, AppError> {
+    require_proxy_app(&app_type).map_err(|e| AppError::Config(e.to_string()))?;
     // 这个功能需要访问运行中的代理服务器的内存状态
     // 目前先返回 None，后续可以通过 ProxyService 暴露接口来实现
     let _ = (state, provider_id, app_type);
