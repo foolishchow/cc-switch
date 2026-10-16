@@ -4,8 +4,9 @@
 //! - 支持三应用开关（Claude/Codex/Gemini）
 //! - SSOT 存储在 ~/.cc-switch/skills/
 
+use cc_command_api::command_api;
 use crate::app_config::{AppType, InstalledSkill, UnmanagedSkill};
-use crate::error::format_skill_error;
+use crate::error::{format_skill_error, AppError};
 use crate::services::skill::{
     DiscoverableSkill, ImportSkillSelection, MigrationResult, Skill, SkillAppSyncOutcome,
     SkillBackupEntry, SkillDiscoveryResult, SkillRepo, SkillService, SkillStorageLocation,
@@ -33,14 +34,14 @@ pub fn get_installed_skills(app_state: State<'_, AppState>) -> Result<Vec<Instal
     SkillService::get_all_installed(&app_state.db).map_err(|e| e.to_string())
 }
 
-#[tauri::command]
-pub fn get_skill_backups() -> Result<Vec<SkillBackupEntry>, String> {
-    SkillService::list_backups().map_err(|e| e.to_string())
+#[command_api(rest = "GET /control/v1/skills/backups")]
+pub fn get_skill_backups() -> Result<Vec<SkillBackupEntry>, AppError> {
+    SkillService::list_backups().map_err(|e| AppError::Config(e.to_string()))
 }
 
-#[tauri::command]
-pub fn delete_skill_backup(backup_id: String) -> Result<bool, String> {
-    SkillService::delete_backup(&backup_id).map_err(|e| e.to_string())?;
+#[command_api(rest = "DELETE /control/v1/skills/backups/:backup_id", path = "backup_id")]
+pub fn delete_skill_backup(backup_id: String) -> Result<bool, AppError> {
+    SkillService::delete_backup(&backup_id).map_err(|e| AppError::Config(e.to_string()))?;
     Ok(true)
 }
 
