@@ -119,30 +119,30 @@ pub fn import_skills_from_apps(
 // ========== 发现功能命令 ==========
 
 /// 发现可安装的 Skills（从仓库获取），并逐仓库报告没读到的仓库
-#[tauri::command]
+#[command_api(rest = "GET /control/v1/skills/discover", state = "service,app_state")]
 pub async fn discover_available_skills(
-    service: State<'_, SkillServiceState>,
-    app_state: State<'_, AppState>,
-) -> Result<SkillDiscoveryResult, String> {
-    let repos = app_state.db.get_skill_repos().map_err(|e| e.to_string())?;
+    service: &SkillServiceState,
+    app_state: &AppState,
+) -> Result<SkillDiscoveryResult, AppError> {
+    let repos = app_state.db.get_skill_repos().map_err(|e| AppError::Config(e.to_string()))?;
     service
         .0
         .discover_available_report(repos)
         .await
-        .map_err(|e| e.to_string())
+        .map_err(|e| AppError::Config(e.to_string()))
 }
 
 /// 检查 Skills 更新，并逐仓库报告没读到的仓库
-#[tauri::command]
+#[command_api(rest = "GET /control/v1/skills/check-updates", state = "service,app_state")]
 pub async fn check_skill_updates(
-    service: State<'_, SkillServiceState>,
-    app_state: State<'_, AppState>,
-) -> Result<SkillUpdateCheckResult, String> {
+    service: &SkillServiceState,
+    app_state: &AppState,
+) -> Result<SkillUpdateCheckResult, AppError> {
     service
         .0
         .check_updates_report(&app_state.db)
         .await
-        .map_err(|e| e.to_string())
+        .map_err(|e| AppError::Config(e.to_string()))
 }
 
 /// 立即重新同步：按数据库里的开关和当前同步方式，把 Skill 重新投影到各应用目录，
