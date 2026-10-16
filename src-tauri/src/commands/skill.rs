@@ -158,26 +158,26 @@ pub async fn resync_skills_to_apps(
 }
 
 /// 更新单个 Skill
-#[tauri::command]
+#[command_api(rest = "POST /control/v1/skills/:id/update", path = "id", state = "service,app_state")]
 pub async fn update_skill(
     id: String,
-    service: State<'_, SkillServiceState>,
-    app_state: State<'_, AppState>,
-) -> Result<InstalledSkill, String> {
+    service: &SkillServiceState,
+    app_state: &AppState,
+) -> Result<InstalledSkill, AppError> {
     service
         .0
         .update_skill(&app_state.db, &id)
         .await
-        .map_err(|e| e.to_string())
+        .map_err(|e| AppError::Config(e.to_string()))
 }
 
 /// 迁移 Skill 存储位置
-#[tauri::command]
+#[command_api(rest = "POST /control/v1/skills/migrate-storage", body = "target", state = "app_state")]
 pub async fn migrate_skill_storage(
     target: SkillStorageLocation,
-    app_state: State<'_, AppState>,
-) -> Result<MigrationResult, String> {
-    SkillService::migrate_storage(&app_state.db, target).map_err(|e| e.to_string())
+    app_state: &AppState,
+) -> Result<MigrationResult, AppError> {
+    SkillService::migrate_storage(&app_state.db, target).map_err(|e| AppError::Config(e.to_string()))
 }
 
 /// CC Switch 目录下放 Skill 主副本的位置（改过配置目录就是改后的）
