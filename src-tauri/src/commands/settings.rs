@@ -2,6 +2,7 @@
 
 use cc_command_api::command_api;
 use crate::error::AppError;
+use crate::store::AppState;
 use tauri::{AppHandle, Emitter};
 use tauri_plugin_updater::UpdaterExt;
 
@@ -160,62 +161,62 @@ pub struct CodexUnifyHistoryRestoreResult {
 }
 
 /// 是否存在统一会话开关的迁移备份（决定关闭弹窗里是否显示"恢复备份"勾选）。
-#[tauri::command]
-pub async fn has_codex_unify_history_backup() -> Result<bool, String> {
+#[command_api]
+pub async fn has_codex_unify_history_backup() -> Result<bool, AppError> {
     Ok(crate::codex_history_migration::has_codex_official_history_unify_backup())
 }
 
 /// Codex 的 `config.toml` 是不是用 `[features] multi_agent_v2` 强制了新版子 agent 工具
 /// （这时「经典子 agent 工具」开关不生效，界面上提示）。
-#[tauri::command]
-pub async fn codex_forces_multi_agent_v2() -> Result<bool, String> {
-    let text = crate::codex_config::read_codex_config_text().map_err(|e| e.to_string())?;
+#[command_api]
+pub async fn codex_forces_multi_agent_v2() -> Result<bool, AppError> {
+    let text = crate::codex_config::read_codex_config_text().map_err(|e| AppError::Config(e.to_string()))?;
     Ok(crate::codex_config::codex_config_forces_multi_agent_v2(
         &text,
     ))
 }
 
 /// Codex 会话压缩开关（`[features] local_thread_store_compression`）当前是否开启。
-#[tauri::command]
-pub async fn get_codex_session_compression() -> Result<bool, String> {
-    crate::services::codex_session_compression::is_enabled().map_err(|e| e.to_string())
+#[command_api]
+pub async fn get_codex_session_compression() -> Result<bool, AppError> {
+    crate::services::codex_session_compression::is_enabled().map_err(|e| AppError::Config(e.to_string()))
 }
 
 /// 开关 Codex 会话压缩，返回写入后的状态。
-#[tauri::command]
+#[command_api]
 pub async fn set_codex_session_compression(
-    state: tauri::State<'_, crate::store::AppState>,
+    state: &AppState,
     enabled: bool,
-) -> Result<bool, String> {
+) -> Result<bool, AppError> {
     let db = state.db.clone();
     tauri::async_runtime::spawn_blocking(move || {
         crate::services::codex_session_compression::set_enabled(&db, enabled)
     })
     .await
-    .map_err(|e| e.to_string())?
-    .map_err(|e| e.to_string())
+    .map_err(|e| AppError::Config(e.to_string()))?
+    .map_err(|e| AppError::Config(e.to_string()))
 }
 
 /// Codex 会话目录（sessions + archived_sessions）当前占用的字节数。
-#[tauri::command]
-pub async fn get_codex_sessions_disk_usage() -> Result<u64, String> {
+#[command_api]
+pub async fn get_codex_sessions_disk_usage() -> Result<u64, AppError> {
     tauri::async_runtime::spawn_blocking(
         crate::services::codex_session_compression::sessions_disk_usage,
     )
     .await
-    .map_err(|e| e.to_string())
+    .map_err(|e| AppError::Config(e.to_string()))
 }
 
 /// 按迁移备份账本把当时迁入共享桶的官方会话还原回 "openai" 桶。
 /// 由关闭统一会话开关的确认弹窗触发；幂等，可安全重试。
-#[tauri::command]
-pub async fn restore_codex_unified_history() -> Result<CodexUnifyHistoryRestoreResult, String> {
+#[command_api]
+pub async fn restore_codex_unified_history() -> Result<CodexUnifyHistoryRestoreResult, AppError> {
     let outcome = tauri::async_runtime::spawn_blocking(|| {
         crate::codex_history_migration::restore_codex_official_history_from_backups()
     })
     .await
-    .map_err(|e| e.to_string())?
-    .map_err(|e| e.to_string())?;
+    .map_err(|e| AppError::Config(e.to_string()))?
+    .map_err(|e| AppError::Config(e.to_string()))?;
 
     if let Some(reason) = &outcome.skipped_reason {
         log::debug!("○ Codex official history restore skipped: {reason}");
@@ -367,8 +368,8 @@ pub async fn set_app_config_dir_override(
 }
 
 /// 设置开机自启
-#[tauri::command]
-pub async fn set_auto_launch(enabled: bool) -> Result<bool, String> {
+#[command_api]
+pub async fn set_auto_launch(enabled: bool) -> Result<bool, AppError> {
     if enabled {
         crate::auto_launch::enable_auto_launch().map_err(|e| format!("启用开机自启失败: {e}"))?;
     } else {
@@ -700,95 +701,95 @@ mod tests {
 }
 
 /// 获取开机自启状态
-#[tauri::command]
-pub async fn get_auto_launch_status() -> Result<bool, String> {
-    crate::auto_launch::is_auto_launch_enabled().map_err(|e| format!("获取开机自启状态失败: {e}"))
+#[command_api]
+pub async fn get_auto_launch_status() -> Result<bool, AppError> {
+    crate::auto_launch::is_auto_launch_enabled().map_err(|e| AppError::Config(format!("获取开机自启状态失败: {e}")))
 }
 
 /// 获取整流器配置
-#[tauri::command]
+#[command_api]
 pub async fn get_rectifier_config(
-    state: tauri::State<'_, crate::AppState>,
-) -> Result<crate::proxy::types::RectifierConfig, String> {
-    state.db.get_rectifier_config().map_err(|e| e.to_string())
+    state: &AppState,
+) -> Result<crate::proxy::types::RectifierConfig, AppError> {
+    state.db.get_rectifier_config().map_err(|e| AppError::Config(e.to_string()))
 }
 
 /// 设置整流器配置
-#[tauri::command]
+#[command_api]
 pub async fn set_rectifier_config(
-    state: tauri::State<'_, crate::AppState>,
+    state: &AppState,
     config: crate::proxy::types::RectifierConfig,
-) -> Result<bool, String> {
+) -> Result<bool, AppError> {
     state
         .db
         .set_rectifier_config(&config)
-        .map_err(|e| e.to_string())?;
+        .map_err(|e| AppError::Config(e.to_string()))?;
     Ok(true)
 }
 
 /// 获取优化器配置
-#[tauri::command]
+#[command_api]
 pub async fn get_optimizer_config(
-    state: tauri::State<'_, crate::AppState>,
-) -> Result<crate::proxy::types::OptimizerConfig, String> {
-    state.db.get_optimizer_config().map_err(|e| e.to_string())
+    state: &AppState,
+) -> Result<crate::proxy::types::OptimizerConfig, AppError> {
+    state.db.get_optimizer_config().map_err(|e| AppError::Config(e.to_string()))
 }
 
 /// 设置优化器配置
-#[tauri::command]
+#[command_api]
 pub async fn set_optimizer_config(
-    state: tauri::State<'_, crate::AppState>,
+    state: &AppState,
     config: crate::proxy::types::OptimizerConfig,
-) -> Result<bool, String> {
+) -> Result<bool, AppError> {
     state
         .db
         .set_optimizer_config(&config)
-        .map_err(|e| e.to_string())?;
+        .map_err(|e| AppError::Config(e.to_string()))?;
     Ok(true)
 }
 
 /// 获取 Copilot 优化器配置
-#[tauri::command]
+#[command_api]
 pub async fn get_copilot_optimizer_config(
-    state: tauri::State<'_, crate::AppState>,
-) -> Result<crate::proxy::types::CopilotOptimizerConfig, String> {
+    state: &AppState,
+) -> Result<crate::proxy::types::CopilotOptimizerConfig, AppError> {
     state
         .db
         .get_copilot_optimizer_config()
-        .map_err(|e| e.to_string())
+        .map_err(|e| AppError::Config(e.to_string()))
 }
 
 /// 设置 Copilot 优化器配置
-#[tauri::command]
+#[command_api]
 pub async fn set_copilot_optimizer_config(
-    state: tauri::State<'_, crate::AppState>,
+    state: &AppState,
     config: crate::proxy::types::CopilotOptimizerConfig,
-) -> Result<bool, String> {
+) -> Result<bool, AppError> {
     state
         .db
         .set_copilot_optimizer_config(&config)
-        .map_err(|e| e.to_string())?;
+        .map_err(|e| AppError::Config(e.to_string()))?;
     Ok(true)
 }
 
 /// 获取日志配置
-#[tauri::command]
+#[command_api]
 pub async fn get_log_config(
-    state: tauri::State<'_, crate::AppState>,
-) -> Result<crate::proxy::types::LogConfig, String> {
-    state.db.get_log_config().map_err(|e| e.to_string())
+    state: &AppState,
+) -> Result<crate::proxy::types::LogConfig, AppError> {
+    state.db.get_log_config().map_err(|e| AppError::Config(e.to_string()))
 }
 
 /// 设置日志配置
-#[tauri::command]
+#[command_api]
 pub async fn set_log_config(
-    state: tauri::State<'_, crate::AppState>,
+    state: &AppState,
     config: crate::proxy::types::LogConfig,
-) -> Result<bool, String> {
+) -> Result<bool, AppError> {
     state
         .db
         .set_log_config(&config)
-        .map_err(|e| e.to_string())?;
+        .map_err(|e| AppError::Config(e.to_string()))?;
     log::set_max_level(config.to_level_filter());
     log::info!(
         "日志配置已更新: enabled={}, level={}",
