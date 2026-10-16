@@ -47,17 +47,17 @@ pub async fn stop_proxy_server(state: &AppState) -> Result<(), AppError> {
 }
 
 /// 关闭本地路由：所有应用退回直连，再停止代理服务器
-#[tauri::command]
-pub async fn stop_proxy_with_restore(state: tauri::State<'_, AppState>) -> Result<(), String> {
-    crate::mode::controller::exit_all(state.inner()).await
+#[command_api(rest = "POST /control/v1/proxy/stop-with-restore")]
+pub async fn stop_proxy_with_restore(state: &AppState) -> Result<(), AppError> {
+    crate::mode::controller::exit_all(state).await.map_err(AppError::Config)
 }
 
 /// 获取各应用接管状态
-#[tauri::command]
+#[command_api(rest = "GET /control/v1/proxy/takeover-status")]
 pub async fn get_proxy_takeover_status(
-    state: tauri::State<'_, AppState>,
-) -> Result<ProxyTakeoverStatus, String> {
-    state.proxy_service.get_takeover_status().await
+    state: &AppState,
+) -> Result<ProxyTakeoverStatus, AppError> {
+    state.proxy_service.get_takeover_status().await.map_err(AppError::Config)
 }
 
 /// 为指定应用进入 / 退出代理模式。`stack` 为真时进入的是 Stack 模式（和路由模式二选一），
@@ -208,20 +208,20 @@ pub async fn get_proxy_status(state: &AppState) -> Result<ProxyStatus, AppError>
 }
 
 /// 获取代理配置
-#[tauri::command]
-pub async fn get_proxy_config(state: tauri::State<'_, AppState>) -> Result<ProxyConfig, String> {
-    state.proxy_service.get_config().await
+#[command_api(rest = "GET /control/v1/proxy/config")]
+pub async fn get_proxy_config(state: &AppState) -> Result<ProxyConfig, AppError> {
+    state.proxy_service.get_config().await.map_err(AppError::Config)
 }
 
 /// 更新代理配置
-#[tauri::command]
+#[command_api(rest = "PUT /control/v1/proxy/config")]
 pub async fn update_proxy_config(
-    state: tauri::State<'_, AppState>,
+    state: &AppState,
     config: ProxyConfig,
-) -> Result<(), String> {
-    if state.proxy_service.update_config(&config).await? {
+) -> Result<(), AppError> {
+    if state.proxy_service.update_config(&config).await.map_err(AppError::Config)? {
         // 代理换了地址：按新地址重写接上代理的客户端。
-        crate::mode::controller::resync_routes(state.inner()).await?;
+        crate::mode::controller::resync_routes(state).await.map_err(AppError::Config)?;
     }
     Ok(())
 }
