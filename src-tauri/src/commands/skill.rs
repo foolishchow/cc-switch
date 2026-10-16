@@ -50,20 +50,20 @@ pub fn delete_skill_backup(backup_id: String) -> Result<bool, AppError> {
 /// 参数：
 /// - skill: 从发现列表获取的技能信息
 /// - current_app: 当前选中的应用，安装后默认启用该应用
-#[tauri::command]
+#[command_api(rest = "POST /control/v1/skills/install", body = "skill,current_app", state = "service,app_state")]
 pub async fn install_skill_unified(
     skill: DiscoverableSkill,
     current_app: String,
-    service: State<'_, SkillServiceState>,
-    app_state: State<'_, AppState>,
-) -> Result<InstalledSkill, String> {
-    let app_type = parse_app_type(&current_app)?;
+    service: &SkillServiceState,
+    app_state: &AppState,
+) -> Result<InstalledSkill, AppError> {
+    let app_type = parse_app_type(&current_app).map_err(|e| AppError::Config(e.to_string()))?;
 
     service
         .0
         .install(&app_state.db, &skill, &app_type)
         .await
-        .map_err(|e| e.to_string())
+        .map_err(|e| AppError::Config(e.to_string()))
 }
 
 /// 卸载 Skill（新版统一卸载）
