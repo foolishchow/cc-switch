@@ -823,9 +823,9 @@ async fn query_provider_usage_inner(
 
 #[allow(non_snake_case)]
 #[allow(clippy::too_many_arguments)]
-#[tauri::command]
+#[command_api(rest = "POST /control/v1/providers/:app/test-usage-script", path = "app", body = "providerId,scriptCode,timeout,apiKey,baseUrl,accessToken,userId,templateType")]
 pub async fn testUsageScript(
-    state: State<'_, AppState>,
+    state: &AppState,
     #[allow(non_snake_case)] providerId: String,
     app: String,
     #[allow(non_snake_case)] scriptCode: String,
@@ -835,10 +835,10 @@ pub async fn testUsageScript(
     #[allow(non_snake_case)] accessToken: Option<String>,
     #[allow(non_snake_case)] userId: Option<String>,
     #[allow(non_snake_case)] templateType: Option<String>,
-) -> Result<crate::provider::UsageResult, String> {
-    let app_type = AppType::from_str(&app).map_err(|e| e.to_string())?;
+) -> Result<crate::provider::UsageResult, AppError> {
+    let app_type = AppType::from_str(&app).map_err(|e| AppError::Config(e.to_string()))?;
     ProviderService::test_usage_script(
-        state.inner(),
+        state,
         app_type,
         &providerId,
         &scriptCode,
@@ -850,58 +850,58 @@ pub async fn testUsageScript(
         templateType.as_deref(),
     )
     .await
-    .map_err(|e| e.to_string())
+    .map_err(|e| AppError::Config(e.to_string()))
 }
 
-#[tauri::command]
-pub fn read_live_provider_settings(app: String) -> Result<serde_json::Value, String> {
-    let app_type = AppType::from_str(&app).map_err(|e| e.to_string())?;
-    ProviderService::read_live_settings(app_type).map_err(|e| e.to_string())
+#[command_api(rest = "GET /control/v1/providers/:app/live-settings", path = "app")]
+pub fn read_live_provider_settings(app: String) -> Result<serde_json::Value, AppError> {
+    let app_type = AppType::from_str(&app).map_err(|e| AppError::Config(e.to_string()))?;
+    ProviderService::read_live_settings(app_type).map_err(|e| AppError::Config(e.to_string()))
 }
 
-#[tauri::command]
+#[command_api(rest = "POST /control/v1/providers/test-api-endpoints", body = "urls,timeoutSecs")]
 pub async fn test_api_endpoints(
     urls: Vec<String>,
     #[allow(non_snake_case)] timeoutSecs: Option<u64>,
-) -> Result<Vec<EndpointLatency>, String> {
+) -> Result<Vec<EndpointLatency>, AppError> {
     SpeedtestService::test_endpoints(urls, timeoutSecs)
         .await
-        .map_err(|e| e.to_string())
+        .map_err(|e| AppError::Config(e.to_string()))
 }
 
-#[tauri::command]
+#[command_api(rest = "GET /control/v1/providers/:app/:providerId/custom-endpoints", path = "app,providerId")]
 pub fn get_custom_endpoints(
-    state: State<'_, AppState>,
+    state: &AppState,
     app: String,
     #[allow(non_snake_case)] providerId: String,
-) -> Result<Vec<crate::settings::CustomEndpoint>, String> {
-    let app_type = AppType::from_str(&app).map_err(|e| e.to_string())?;
-    ProviderService::get_custom_endpoints(state.inner(), app_type, &providerId)
-        .map_err(|e| e.to_string())
+) -> Result<Vec<crate::settings::CustomEndpoint>, AppError> {
+    let app_type = AppType::from_str(&app).map_err(|e| AppError::Config(e.to_string()))?;
+    ProviderService::get_custom_endpoints(state, app_type, &providerId)
+        .map_err(|e| AppError::Config(e.to_string()))
 }
 
-#[tauri::command]
+#[command_api(rest = "POST /control/v1/providers/:app/:providerId/custom-endpoints", path = "app,providerId", body = "url")]
 pub fn add_custom_endpoint(
-    state: State<'_, AppState>,
+    state: &AppState,
     app: String,
     #[allow(non_snake_case)] providerId: String,
     url: String,
-) -> Result<(), String> {
-    let app_type = AppType::from_str(&app).map_err(|e| e.to_string())?;
-    ProviderService::add_custom_endpoint(state.inner(), app_type, &providerId, url)
-        .map_err(|e| e.to_string())
+) -> Result<(), AppError> {
+    let app_type = AppType::from_str(&app).map_err(|e| AppError::Config(e.to_string()))?;
+    ProviderService::add_custom_endpoint(state, app_type, &providerId, url)
+        .map_err(|e| AppError::Config(e.to_string()))
 }
 
-#[tauri::command]
+#[command_api(rest = "DELETE /control/v1/providers/:app/:providerId/custom-endpoints/:url", path = "app,providerId,url")]
 pub fn remove_custom_endpoint(
-    state: State<'_, AppState>,
+    state: &AppState,
     app: String,
     #[allow(non_snake_case)] providerId: String,
     url: String,
-) -> Result<(), String> {
-    let app_type = AppType::from_str(&app).map_err(|e| e.to_string())?;
-    ProviderService::remove_custom_endpoint(state.inner(), app_type, &providerId, url)
-        .map_err(|e| e.to_string())
+) -> Result<(), AppError> {
+    let app_type = AppType::from_str(&app).map_err(|e| AppError::Config(e.to_string()))?;
+    ProviderService::remove_custom_endpoint(state, app_type, &providerId, url)
+        .map_err(|e| AppError::Config(e.to_string()))
 }
 
 #[tauri::command]
