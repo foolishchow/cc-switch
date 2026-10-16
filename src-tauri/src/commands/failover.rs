@@ -151,18 +151,17 @@ pub async fn remove_from_failover_queue(
 }
 
 /// 获取指定应用的自动故障转移开关状态（从 proxy_config 表读取）
-#[tauri::command]
+#[command_api(rest = "GET /control/v1/failover/auto-enabled", query = "app_type")]
 pub async fn get_auto_failover_enabled(
-    state: tauri::State<'_, AppState>,
+    state: &AppState,
     app_type: String,
-) -> Result<bool, String> {
+) -> Result<bool, AppError> {
     require_failover_app(&app_type)?;
     state
         .db
         .get_proxy_config_for_app(&app_type)
         .await
         .map(|config| config.auto_failover_enabled)
-        .map_err(|e| e.to_string())
 }
 
 /// 设置指定应用的自动故障转移开关状态（写入 proxy_config 表）
